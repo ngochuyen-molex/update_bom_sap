@@ -1,0 +1,38 @@
+Read Excel
+FOR each row in dataframe:
+
+    Check if anything needs changing
+
+    IF no change
+        Log "No Change"
+        CONTINUE
+
+    Open BOM
+
+    Find Item Row
+
+    IF item not found
+        Log error
+        CONTINUE
+
+    Read current Component from SAP
+
+    Read current Qty from SAP
+
+    Validate current SAP data
+
+    IF SAP Component != Excel Component Before
+        Log error
+        CONTINUE
+
+    IF SAP Qty != Excel Qty Before
+        Log error
+        CONTINUE
+
+    Update Component
+
+    Update Qty
+
+    Save BOM
+
+    Log Success
