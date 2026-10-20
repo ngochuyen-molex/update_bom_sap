@@ -16,7 +16,6 @@ def clean_text(value):
 
 def clean_component(value):
     value = clean_text(value)
-
     try:
         # handles (.0, .000)
         return str(int(float(value))).lstrip("0")
@@ -29,10 +28,11 @@ def clean_item(value):
     if value.endswith(".0"):
         value = value[:-2]
 
-    # SAP item is often 0010, 0020, 0050
-    # If Excel gives 10, convert to 0010
-    if value.isdigit() and len(value) < 4:
-        value = value.zfill(4)
+    if value.isdigit():
+        if len(value) == 1 and value != "0":
+            value = str(int(value) * 10)
+        if len(value) < 4:
+            value = value.zfill(4)
 
     return value
 
@@ -58,7 +58,6 @@ def clean_number(value):
 def numbers_equal(a, b, decimal_places=2):
     a = clean_number(a)
     b = clean_number(b)
-
     if a is None and b is None:
         return True
 
@@ -79,9 +78,19 @@ def open_cs02(session):
     session.findById("wnd[0]/tbar[0]/okcd").text = "/NCS02"
     press_enter(session)
 
-def open_bom(session, material, alt_bom, bom_usage="1", plant="1901"):
-    # print(f"Material={clean_component(material)}, "
-    #     f"Alt BOM={clean_component(alt_bom)}")
+def open_bom(
+    session,
+    material,
+    alt_bom,
+    bom_usage="1",
+    plant="1901",
+    component=None,
+    item=None,
+):
+    print(f"Material={clean_component(material)}, "
+        f"Alt BOM={clean_component(alt_bom)}", 
+        f"Component={component}",
+        f"Item={clean_item(item)}")
     set_text(session, "wnd[0]/usr/ctxt[0]", clean_component(material))
     set_text(session, "wnd[0]/usr/ctxt[1]", plant)
     set_text(session, "wnd[0]/usr/ctxt[2]", bom_usage)
@@ -124,22 +133,109 @@ def find_item_row(session, target_item):
     table = get_bom_item_table(session)
 
     target_item = clean_item(target_item)
+    if not target_item:
+        raise ValueError("Item number is blank.")
 
-    for row_idx in range(table.RowCount):
-        current_item = get_item(session, row_idx)
+    total_rows = int(table.RowCount)
+    visible_rows = int(table.VisibleRowCount)
+    if visible_rows <= 0:
+        raise ValueError("SAP BOM table has no visible rows to search.")
 
-        if current_item == target_item:
-            return row_idx
+    scrollbar = table.VerticalScrollbar
+    last_start = max(0, total_rows - visible_rows)
+    page_starts = list(range(0, last_start + 1, visible_rows))
+    if not page_starts or page_starts[-1] != last_start:
+        page_starts.append(last_start)
+
+    scanned_rows = set()
+    for requested_start in page_starts:
+        scrollbar.Position = requested_start
+        first_row = int(scrollbar.Position)
+        page_row_count = min(visible_rows, total_rows - first_row)
+
+        for visible_idx in range(page_row_count):
+            absolute_idx = first_row + visible_idx
+            if absolute_idx in scanned_rows:
+                continue
+            scanned_rows.add(absolute_idx)
+
+            current_item = clean_item(get_item(session, visible_idx))
+            if current_item == target_item:
+                return visible_idx
 
     raise ValueError(f"Item {target_item} not found in BOM table.")
+
+def find_component_row(session, target_component):
+    table = get_bom_item_table(session)
+    target_component = clean_component(target_component)
+    if not target_component:
+        raise ValueError("Component before is blank.")
+
+    total_rows = int(table.RowCount)
+    visible_rows = int(table.VisibleRowCount)
+    if visible_rows <= 0:
+        raise ValueError("SAP BOM table has no visible rows to search.")
+
+    scrollbar = table.VerticalScrollbar
+    last_start = max(0, total_rows - visible_rows)
+    page_starts = list(range(0, last_start + 1, visible_rows))
+    if not page_starts or page_starts[-1] != last_start:
+        page_starts.append(last_start)
+
+    scanned_rows = set()
+    matching_rows = []
+    for requested_start in page_starts:
+        scrollbar.Position = requested_start
+        first_row = int(scrollbar.Position)
+        page_row_count = min(visible_rows, total_rows - first_row)
+
+        for visible_idx in range(page_row_count):
+            absolute_idx = first_row + visible_idx
+            if absolute_idx in scanned_rows:
+                continue
+            scanned_rows.add(absolute_idx)
+
+            current_component = clean_component(
+                get_component(session, visible_idx)
+            )
+            if current_component == target_component:
+                matching_rows.append((absolute_idx, first_row))
+
+    if not matching_rows:
+        raise ValueError(
+            f"Component {target_component} not found in BOM table."
+        )
+    if len(matching_rows) > 1:
+        raise ValueError(
+            f"Component {target_component} matches multiple BOM rows: "
+            f"{matching_rows}."
+        )
+
+    absolute_row, page_start = matching_rows[0]
+    scrollbar.Position = page_start
+    visible_row = absolute_row - int(scrollbar.Position)
+    if not 0 <= visible_row < visible_rows:
+        raise ValueError(
+            f"Found component {target_component} at SAP row {absolute_row}, "
+            "but could not restore that row into the visible table."
+        )
+
+    actual_component = get_component(session, visible_row)
+    if clean_component(actual_component) != target_component:
+        raise ValueError(
+            f"Found component {target_component} at SAP row {absolute_row}, "
+            f"but after restoring the table SAP row {visible_row} contains "
+            f"{actual_component!r}. No update was made."
+        )
+
+    return visible_row
 
 def is_blank_row(row):
     return (
         clean_text(row["Parent Material"]) == ""
         and clean_text(row["Alternative BOM"]) == ""
-        and clean_text(row["Item"]) == ""
+        and clean_text(row.get("Item")) == ""
     )
-
 # ============================================================
 # VALIDATION BEFORE UPDATE
 # ============================================================
