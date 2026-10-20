@@ -1,0 +1,3 @@
+*.vbs
+__pycache__/
+.gitignore/
