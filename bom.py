@@ -101,6 +101,13 @@ def open_bom(
 def get_bom_item_table(session):
     return session.findById(BOM_TABLE_ID)
 
+def scroll_bom_table(session, position):
+    # SAP re-renders the table after scrolling, so old table/scrollbar
+    # references become invalid. Always re-fetch them.
+    # See note.md, section 2.
+    get_bom_item_table(session).VerticalScrollbar.Position = position
+    return int(get_bom_item_table(session).VerticalScrollbar.Position)
+
 def open_bom_header(session):
     session.findById("wnd[0]/tbar[1]/btn[6]").press()
 # ============================================================
@@ -130,6 +137,8 @@ def get_component_status_bar_text(session):
 # ============================================================
 
 def find_item_row(session, target_item):
+    # Returns a visible row index. See note.md, sections 2-3.
+    # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
 
     target_item = clean_item(target_item)
@@ -141,7 +150,6 @@ def find_item_row(session, target_item):
     if visible_rows <= 0:
         raise ValueError("SAP BOM table has no visible rows to search.")
 
-    scrollbar = table.VerticalScrollbar
     last_start = max(0, total_rows - visible_rows)
     page_starts = list(range(0, last_start + 1, visible_rows))
     if not page_starts or page_starts[-1] != last_start:
@@ -149,8 +157,7 @@ def find_item_row(session, target_item):
 
     scanned_rows = set()
     for requested_start in page_starts:
-        scrollbar.Position = requested_start
-        first_row = int(scrollbar.Position)
+        first_row = scroll_bom_table(session, requested_start)
         page_row_count = min(visible_rows, total_rows - first_row)
 
         for visible_idx in range(page_row_count):
@@ -166,6 +173,9 @@ def find_item_row(session, target_item):
     raise ValueError(f"Item {target_item} not found in BOM table.")
 
 def find_component_row(session, target_component):
+    # Used when Excel Item is blank. Fails on duplicates on purpose.
+    # See note.md, sections 1-3.
+    # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
     target_component = clean_component(target_component)
     if not target_component:
@@ -176,7 +186,6 @@ def find_component_row(session, target_component):
     if visible_rows <= 0:
         raise ValueError("SAP BOM table has no visible rows to search.")
 
-    scrollbar = table.VerticalScrollbar
     last_start = max(0, total_rows - visible_rows)
     page_starts = list(range(0, last_start + 1, visible_rows))
     if not page_starts or page_starts[-1] != last_start:
@@ -185,8 +194,7 @@ def find_component_row(session, target_component):
     scanned_rows = set()
     matching_rows = []
     for requested_start in page_starts:
-        scrollbar.Position = requested_start
-        first_row = int(scrollbar.Position)
+        first_row = scroll_bom_table(session, requested_start)
         page_row_count = min(visible_rows, total_rows - first_row)
 
         for visible_idx in range(page_row_count):
@@ -211,9 +219,10 @@ def find_component_row(session, target_component):
             f"{matching_rows}."
         )
 
+    # Scroll back to the matched page and convert absolute row -> visible row.
+    # See note.md, section 3.
     absolute_row, page_start = matching_rows[0]
-    scrollbar.Position = page_start
-    visible_row = absolute_row - int(scrollbar.Position)
+    visible_row = absolute_row - scroll_bom_table(session, page_start)
     if not 0 <= visible_row < visible_rows:
         raise ValueError(
             f"Found component {target_component} at SAP row {absolute_row}, "

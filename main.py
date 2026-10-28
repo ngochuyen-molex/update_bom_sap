@@ -4,7 +4,7 @@ from connect import get_session, SAPConnectionError
 from excel_utils import load_excel
 from bom import *
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\change bom source.xlsx"
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM.xlsx"
 
 
 def add_log(df, idx, message):
@@ -93,6 +93,8 @@ def main():
                 # ------------------------------------------
                 add_log(df, idx, "About to find matching item")
 
+                # Item filled -> find by item; Item blank -> find by
+                # Component before. See note.md, section 1.
                 target_item = row.get("Item")
                 if clean_item(target_item):
                     match_method = "item number"
