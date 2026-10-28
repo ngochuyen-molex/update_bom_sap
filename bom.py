@@ -327,29 +327,3 @@ def save_bom(session):
 def update_base_quantity(session,base_qty):
     session.findById("wnd[0]/usr/tabsTS_HEAD/tabpKHPT/ssub/2/3/txt[2]").text = clean_number(base_qty)
     press_enter
-# ============================================================
-# DEBUG HELPERS
-# ============================================================
-
-def print_table_info(session):
-    table = get_bom_item_table(session)
-
-    print("Table type:", type(table))
-    print("Row count:", table.RowCount)
-
-    try:
-        print("Column count:", table.Columns.Count)
-
-        for i in range(table.Columns.Count):
-            col = table.Columns(i)
-            print(i, col.Name)
-
-    except Exception as e:
-        print("Could not print columns:", e)
-
-def print_focused_field(session):
-    field = session.ActiveWindow.GuiFocus
-
-    print("ID:", field.Id)
-    print("Name:", field.Name)
-    print("Type:", field.Type)
