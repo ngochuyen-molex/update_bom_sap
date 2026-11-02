@@ -88,3 +88,10 @@ find_row(target):
 > scroll search (`scroll_bom_table()`) if not found. Follow the
 > "Things to watch out for" and "Suggested design" sections, keep returning a
 > visible row index, and read `change_bom/note.md` for background.
+
+
+### todo2
+cleanlayout:
+ bom.py         → shared helpers (cleaning + SAP basics)
+    bom_change.py  → CS02 functions (moved out of bom.py)
+    bom_create.py  → CS01 functions

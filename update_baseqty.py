@@ -2,7 +2,7 @@ import os
 from connect import get_session, SAPConnectionError
 from excel_utils import load_excel
 from bom import *
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\change bom source.xlsx"
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM_unmerged_result.xlsx"
 
 def main():
     try:
@@ -10,7 +10,7 @@ def main():
         open_cs02(session)
         df = load_excel(INPUT_FILE)
         print(f"Loaded {len(df)} rows")
-        unique_df = (df.groupby(["Parent Material","Alternative BOM","New Base"],
+        unique_df = (df.groupby(["Parent Material","Alternative BOM","Base Qty after"],
                     dropna=False,as_index=False).first())
 
         print(f"found {len(unique_df)} unique material and alt bom combinations")
@@ -31,7 +31,7 @@ def main():
                 
                 open_bom_header(session)
 
-                update_base_quantity(session,base_qty=row["New Base"])
+                update_base_quantity(session,base_qty=row["Base Qty after"])
 
                 save_bom(session)
 
