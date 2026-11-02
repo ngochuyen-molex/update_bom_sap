@@ -4,7 +4,7 @@ from connect import get_session, SAPConnectionError
 from excel_utils import load_excel
 from bom import *
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM.xlsx"
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM_list.xlsx"
 
 
 def add_log(df, idx, message):
@@ -24,7 +24,6 @@ def main():
         session = get_session()
         print(f"Connected to SAP system {session.Info.SystemName}")
 
-        open_cs02(session)
 
         # --------------------------------------------------
         # Load Excel
@@ -42,6 +41,7 @@ def main():
         # Loop through Excel rows
         # --------------------------------------------------
         for idx, row in df.iterrows():
+            open_cs02(session)
             try:
                 print("=" * 80)
 
