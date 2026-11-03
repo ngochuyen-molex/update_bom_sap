@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="snowflake-source" content="cortex-agent-authored" />
+  <title>CA02 Routing Assignment - Algorithm</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: Consolas, "Courier New", monospace;
+      max-width: 880px; width: 100%; box-sizing: border-box;
+      margin: 0 auto; padding: clamp(16px, 4vw, 24px);
+      color: light-dark(#1f2937, #e5e7eb);
+      background: light-dark(#ffffff, #111827);
+    }
+    h1 { font-family: system-ui, sans-serif; font-size: 1.4rem; }
+    .card {
+      background: light-dark(#f9fafb, #1f2937);
+      border: 1px solid light-dark(#e5e7eb, #374151);
+      border-radius: 8px; padding: 16px 20px; line-height: 1.7;
+      overflow-x: auto; white-space: pre;
+    }
+    .kw { color: light-dark(#0f766e, #5eead4); font-weight: 700; }   /* keywords */
+    .fn { color: light-dark(#1d4ed8, #93c5fd); }                       /* actions */
+    .cm { color: light-dark(#6b7280, #9ca3af); font-style: italic; }   /* comments */
+    .er { color: light-dark(#b91c1c, #fca5a5); }                       /* errors */
+    .ok { color: light-dark(#15803d, #86efac); }                       /* success */
+    .ind1 { padding-left: 1.5em; }
+    .ind2 { padding-left: 3em; }
+    .ind3 { padding-left: 4.5em; }
+    .ind4 { padding-left: 6em; }
+    .ind5 { padding-left: 7.5em; }
+    .ind6 { padding-left: 9em; }
+    .legend { font-family: system-ui, sans-serif; font-size: 0.85rem; margin: 12px 0 0; }
+    .legend span { margin-right: 14px; }
+  </style>
+</head>
+<body>
+  <h1>CA02 - Assign new BOM to routings (algorithm)</h1>
+  <p class="legend">
+    <span class="kw">KEYWORD</span>
+    <span class="fn">action</span>
+    <span class="er">error</span>
+    <span class="ok">success</span>
+    <span class="cm"># comment</span>
+  </p>
+
+  <div class="card"><span class="kw">CONNECT</span> to SAP
+<span class="kw">READ</span> Excel file <span class="cm"># CHANGE_BOM result (create_main.py)</span>
+<span class="kw">SET</span> materialList <span class="kw">to</span> unique Parent Materials <span class="kw">WHERE</span> STATUS = <span class="ok">SUCCESS</span>
+
+<span class="kw">FOR EACH</span> material <span class="kw">IN</span> materialList
+<span class="ind1"><span class="kw">TRY</span></span>
+
+<span class="ind2"><span class="cm"># ---- Phase 1: read the groups (CA02 visit 1, read only)</span></span>
+<span class="ind2"><span class="fn">GO TO</span> CA02</span>
+<span class="ind2"><span class="fn">ENTER</span> material and plant, <span class="fn">PRESS</span> Enter</span>
+
+<span class="ind2"><span class="kw">IF</span> group pop-up is shown <span class="kw">THEN</span></span>
+<span class="ind3"><span class="kw">SET</span> groupList <span class="kw">to</span> empty</span>
+<span class="ind3"><span class="kw">FOR EACH</span> row <span class="kw">IN</span> group pop-up</span>
+<span class="ind4"><span class="kw">IF</span> Group <span class="kw">AND</span> GrC are both blank <span class="kw">THEN</span></span>
+<span class="ind5"><span class="kw">STOP</span> reading</span>
+<span class="ind4"><span class="kw">END IF</span></span>
+<span class="ind4"><span class="kw">IF</span> Group is filled <span class="kw">THEN</span></span>
+<span class="ind5"><span class="fn">ADD</span> new group to groupList, <span class="fn">REMEMBER</span> its row number</span>
+<span class="ind4"><span class="kw">END IF</span></span>
+<span class="ind4"><span class="fn">ADD</span> GrC to the last group in groupList</span>
+<span class="ind3"><span class="kw">END FOR</span></span>
+<span class="ind2"><span class="kw">ELSE</span></span>
+<span class="ind3"><span class="kw">SET</span> groupList <span class="kw">to</span> one group with all GrC from the header overview</span>
+<span class="ind2"><span class="kw">END IF</span></span>
+
+<span class="ind2"><span class="cm"># ---- Phase 2: process each group (one CA02 visit per group)</span></span>
+<span class="ind2"><span class="kw">FOR EACH</span> group <span class="kw">IN</span> groupList</span>
+<span class="ind3"><span class="fn">GO TO</span> CA02</span>
+<span class="ind3"><span class="fn">ENTER</span> material and plant, <span class="fn">PRESS</span> Enter</span>
+<span class="ind3"><span class="kw">IF</span> group pop-up is shown <span class="kw">THEN</span> <span class="fn">DOUBLE-CLICK</span> group's row</span>
+<span class="ind3"><span class="fn">READ</span> all GrC rows in the header overview</span>
+
+<span class="ind3"><span class="kw">FOR EACH</span> GrC <span class="kw">IN</span> group</span>
+<span class="ind4"><span class="kw">IF</span> GrC is not in header overview <span class="kw">THEN</span></span>
+<span class="ind5"><span class="er">RAISE</span> error "GrC not found"</span>
+<span class="ind4"><span class="kw">END IF</span></span>
+
+<span class="ind4"><span class="fn">DOUBLE-CLICK</span> GrC row</span>
+<span class="ind4"><span class="fn">PRESS</span> btn[7], <span class="fn">DOUBLE-CLICK</span> BOM row 8</span>
+
+<span class="ind4"><span class="kw">SET</span> selectedCount <span class="kw">to</span> 0</span>
+<span class="ind4"><span class="kw">FOR EACH</span> row <span class="kw">IN</span> component table</span>
+<span class="ind5"><span class="kw">IF</span> row is blank <span class="kw">THEN</span> <span class="kw">STOP</span> scanning <span class="kw">END IF</span></span>
+<span class="ind5"><span class="kw">IF</span> operation (txt[10]) is empty <span class="kw">THEN</span></span>
+<span class="ind6"><span class="fn">SELECT</span> the row, <span class="fn">INCREMENT</span> selectedCount</span>
+<span class="ind5"><span class="kw">END IF</span></span>
+<span class="ind4"><span class="kw">END FOR</span></span>
+
+<span class="ind4"><span class="kw">IF</span> selectedCount &gt; 0 <span class="kw">THEN</span></span>
+<span class="ind5"><span class="fn">PRESS</span> btn[5]</span>
+<span class="ind5"><span class="kw">IF</span> operation pop-up is not shown <span class="kw">THEN</span></span>
+<span class="ind6"><span class="er">RAISE</span> error "btn[5] did not open popup"</span>
+<span class="ind5"><span class="kw">END IF</span></span>
+<span class="ind5"><span class="fn">TYPE</span> "0020", <span class="fn">PRESS</span> OK, <span class="fn">PRESS</span> Enter</span>
+<span class="ind4"><span class="kw">END IF</span></span>
+
+<span class="ind4"><span class="fn">PRESS</span> Back 3 times</span>
+<span class="ind4"><span class="kw">IF</span> header overview is not shown <span class="kw">THEN</span></span>
+<span class="ind5"><span class="er">RAISE</span> error "not back on header overview"</span>
+<span class="ind4"><span class="kw">END IF</span></span>
+<span class="ind4"><span class="fn">ADD</span> "group/GrC" to doneList</span>
+<span class="ind3"><span class="kw">END FOR</span></span>
+
+<span class="ind3"><span class="fn">PRESS</span> Save</span>
+<span class="ind2"><span class="kw">END FOR</span></span>
+
+<span class="ind2"><span class="kw">SET</span> status <span class="kw">to</span> <span class="ok">SUCCESS</span></span>
+<span class="ind1"><span class="kw">CATCH</span> error</span>
+<span class="ind2"><span class="kw">SET</span> status <span class="kw">to</span> <span class="er">FAILED</span>, message <span class="kw">to</span> error text</span>
+<span class="ind1"><span class="kw">END TRY</span></span>
+
+<span class="ind1"><span class="fn">WRITE</span> status, message, doneList to Excel</span>
+<span class="kw">END FOR</span></div>
+</body>
+</html>
