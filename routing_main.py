@@ -1,36 +1,46 @@
+import pandas as pd
 from connect import get_session, SAPConnectionError
-from excel_utils import load_excel, save_excel
+from excel_utils import load_excel
 from bom import clean_component
-from models import RoutingTask
-from routing import read_routing_groups, process_group, slow_session
+from routing import process_routing, slow_session
+from routing_sf import load_routings
 
 # Result file of create_main.py: only materials with a newly created BOM
 INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_final.xlsx"
 RESULT_FILE = INPUT_FILE.replace(".xlsx", "_routing.xlsx")
 
-OPERATION = "0020"
 BOM_ROW = 8             # row of the new BOM in the btn[7] popup (from recording)
+# Operations (0020 default, 0030 packaging) are set in routing.py
 
 
-def build_tasks(df):
-    # One RoutingTask per unique Parent Material with BOM STATUS = SUCCESS
-    tasks = {}
-    for idx, row in df.iterrows():
+def get_materials(df):
+    # Unique Parent Materials whose BOM was created (STATUS = SUCCESS)
+    materials = []
+    for _, row in df.iterrows():
         if str(row.get("STATUS")).strip() != "SUCCESS":
             continue
         material = clean_component(row["Parent Material"])
-        if material == "":
-            continue
-        task = tasks.setdefault(material, RoutingTask(material=material, operation=OPERATION))
-        task.excel_rows.append(idx)
-    return list(tasks.values())
+        if material and material not in materials:
+            materials.append(material)
+    return materials
 
 
-def write_result(df, task):
-    for idx in task.excel_rows:
-        df.at[idx, "ROUTING STATUS"] = task.status
-        df.at[idx, "ROUTING MESSAGE"] = task.message
-        df.at[idx, "ROUTINGS DONE"] = ", ".join(task.done)
+def save_results(routings, missing):
+    # One row per routing, plus materials with no routing in MLX_DATALAKE
+    rows = [{
+        "Material": r.material,
+        "Group": r.group,
+        "GrC": r.counter,
+        "Description": r.description,
+        "STATUS": r.status,
+        "MESSAGE": r.message,
+    } for r in routings]
+    rows += [{"Material": m, "STATUS": "FAILED",
+              "MESSAGE": "No routing found in MLX_DATALAKE"} for m in missing]
+    try:
+        pd.DataFrame(rows).to_excel(RESULT_FILE, index=False)
+    except PermissionError:
+        print(f"Could not save {RESULT_FILE}. Close it in Excel.")
 
 
 def main():
@@ -38,34 +48,21 @@ def main():
         session = slow_session(get_session())
         print(f"Connected to SAP system {session.Info.SystemName}")
 
-        df = load_excel(INPUT_FILE)
-        df["ROUTING STATUS"] = ""
-        df["ROUTING MESSAGE"] = ""
-        df["ROUTINGS DONE"] = ""
+        materials = get_materials(load_excel(INPUT_FILE))
+        routings = load_routings(materials)
+        missing = sorted(set(materials) - {r.material for r in routings})
+        print(f"{len(materials)} materials -> {len(routings)} routings")
+        for m in missing:
+            print(f"WARNING: no routing found for {m}")
 
-        tasks = build_tasks(df)
-        print(f"{len(tasks)} materials to process")
-
-        for task in tasks:
-            print("=" * 80)
+        for routing in routings:
             try:
-                read_routing_groups(session, task)
-
-                for group in task.groups:
-                    process_group(session, task, group, BOM_ROW)
-
-                task.status = "SUCCESS"
-                task.message = ""
+                process_routing(session, routing, BOM_ROW)
             except Exception as e:
-                task.status = "FAILED"
-                task.message = str(e)
-            print(f"{task.material}: {task.status} {task.message}")
-
-            write_result(df, task)
-            try:
-                save_excel(df, RESULT_FILE)
-            except PermissionError:
-                print(f"Could not save {RESULT_FILE}. Close it in Excel.")
+                routing.status = "FAILED"
+                routing.message = str(e)
+            print(f"{routing.key}: {routing.status} {routing.message}")
+            save_results(routings, missing)
 
     except SAPConnectionError as e:
         print(f"SAP Connection Error: {e}")

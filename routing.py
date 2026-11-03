@@ -1,9 +1,9 @@
 from bom import clean_component, set_text, press_enter
-from models import RoutingGroup, RoutingTask
+from models import Routing
 import time
 
 # TEMPORARY: wait after every SAP action so the run can be observed. 0 = normal speed.
-STEP_DELAY = 2
+STEP_DELAY = 0
 
 class SlowSAP:
     # Wraps a SAP GUI object: sleeps STEP_DELAY after actions, reads are not delayed
@@ -47,16 +47,22 @@ def slow_session(session):
 GROUP_POPUP_TABLE_ID = "wnd[1]/usr/tblSAPLCPSLTCTRL_2110"
 POPUP_GROUP_COL = 0         # Group (PLNNR) = ctxt[0,row], only filled on the first row of each group
 POPUP_COUNTER_COL = 1       # GrC (PLNAL) = txt[1,row]
-POPUP_DESC_COL = 2          # Task list description (the recording double-clicks this)
+POPUP_DESC_COL = 2          # Task list description = txt[2,row]
 
 # Change Routing: Overview -> header overview (GrC of the selected group only)
 HEADER_TABLE_ID = "wnd[0]/usr/tblSAPLCPDITCTRL_1200"
 HEADER_COUNTER_COL = 0      # GrC = txt[0,row]
-HEADER_DESC_COL = 1         # Task list description
+HEADER_DESC_COL = 1         # Task list description = txt[1,row]
 
 # Component allocation table
 COMP_TABLE_ID = "wnd[0]/usr/tblSAPLCMDITCTRL_1000"
 COMP_OPERATION_COL = 10     # txt[10,row] = assigned operation ("0030", ...)
+COMP_DESC_COL = 13          # txt[13,row] = material description
+
+# Operation per component: packaging -> 0030, everything else -> 0020
+DEFAULT_OPERATION = "0020"
+PACKAGING_OPERATION = "0030"
+PACKAGING_WORDS = ("carton", "sheet", "bag", "silica", "bubble", "box")
 
 # ============================================================
 # BASIC HELPERS
@@ -73,15 +79,39 @@ def clean_counter(value):
     # "022" / "22" / 22.0 -> "22"
     return clean_component(value) or "0"
 
-def scroll_to(session, table_id, absolute_row):
-    # Scroll so absolute_row is visible, return its visible row index.
-    # SAP re-renders after scrolling, so always re-fetch the table.
+def get_status_text(session):
+    return session.findById("wnd[0]/sbar").text.strip()
+
+def find_row(session, table_id, col, target, normalize=str.strip):
+    # Pages through the table and returns the VISIBLE row index whose column
+    # `col` equals `target`. The table stays scrolled to that page.
+    # Stops at the first fully blank row. None if not found.
+    # SAP re-renders after scrolling, so the table is always re-fetched.
+    target = normalize(target)
     table = session.findById(table_id)
-    if absolute_row < int(table.VisibleRowCount) and int(table.VerticalScrollbar.Position) == 0:
-        return absolute_row
-    session.findById(table_id).VerticalScrollbar.Position = absolute_row
-    first_row = int(session.findById(table_id).VerticalScrollbar.Position)
-    return absolute_row - first_row
+    total_rows = int(table.RowCount)
+    visible_rows = int(table.VisibleRowCount)
+
+    position = 0
+    while position < total_rows:
+        session.findById(table_id).VerticalScrollbar.Position = position
+        first_row = int(session.findById(table_id).VerticalScrollbar.Position)
+
+        for row_idx in range(min(visible_rows, total_rows - first_row)):
+            value = get_cell_text(session, table_id, col, row_idx)
+            if value == "" and get_cell_text(session, table_id, col + 1, row_idx) == "":
+                return None     # blank row -> end of list
+            if value and normalize(value) == target:
+                return row_idx
+
+        if first_row + visible_rows >= total_rows:
+            break
+        position = first_row + visible_rows
+    return None
+
+def double_click(session, window, table_id, col, row_idx):
+    session.findById(f"{table_id}/txt[{col},{row_idx}]").setFocus()
+    session.findById(window).sendVKey(2)
 
 # ============================================================
 # NAVIGATION
@@ -99,70 +129,21 @@ def open_routing(session, material, plant="1901"):
 def has_group_popup(session):
     return session.findById(GROUP_POPUP_TABLE_ID, False) is not None
 
-# ============================================================
-# GROUP POPUP ("Entry Option: Group")
-# ============================================================
-def read_group_popup(session):
-    # Reads all rows of the popup into RoutingGroup objects.
-    # Group is only shown on the first row of each group, so blank = same as above.
-    table = session.findById(GROUP_POPUP_TABLE_ID)
-    total_rows = int(table.RowCount)
-    visible_rows = int(table.VisibleRowCount)
+def select_group(session, group):
+    # Group is only on the first row of each group; that row opens the group
+    row_idx = find_row(session, GROUP_POPUP_TABLE_ID, POPUP_GROUP_COL, group)
+    if row_idx is None:
+        raise ValueError(f"Group {group} not found in group popup")
+    double_click(session, "wnd[1]", GROUP_POPUP_TABLE_ID, POPUP_DESC_COL, row_idx)
 
-    groups = []
-    absolute_row = 0
-    while absolute_row < total_rows:
-        session.findById(GROUP_POPUP_TABLE_ID).VerticalScrollbar.Position = absolute_row
-        first_row = int(session.findById(GROUP_POPUP_TABLE_ID).VerticalScrollbar.Position)
-
-        for row_idx in range(min(visible_rows, total_rows - first_row)):
-            group = get_cell_text(session, GROUP_POPUP_TABLE_ID, POPUP_GROUP_COL, row_idx)
-            counter = get_cell_text(session, GROUP_POPUP_TABLE_ID, POPUP_COUNTER_COL, row_idx)
-            if group == "" and counter == "":
-                total_rows = 0      # blank row -> end of list
-                break
-            if group:
-                groups.append(RoutingGroup(group=group, popup_row=first_row + row_idx))
-            if not groups:
-                raise ValueError("First popup row has no group number")
-            groups[-1].counters.append(clean_counter(counter))
-
-        absolute_row = first_row + visible_rows
-
-    session.findById(GROUP_POPUP_TABLE_ID).VerticalScrollbar.Position = 0
-    return groups
-
-def select_popup_row(session, absolute_row):
-    row_idx = scroll_to(session, GROUP_POPUP_TABLE_ID, absolute_row)
-    session.findById(f"{GROUP_POPUP_TABLE_ID}/txt[{POPUP_DESC_COL},{row_idx}]").setFocus()
-    session.findById("wnd[1]").sendVKey(2)
-
-# ============================================================
-# HEADER OVERVIEW (routings of the selected group)
-# ============================================================
-def get_header_counters(session):
-    # {GrC: visible row index}, stops at the first blank row
-    table = session.findById(HEADER_TABLE_ID)
-    counters = {}
-    for row_idx in range(int(table.VisibleRowCount)):
-        counter = get_cell_text(session, HEADER_TABLE_ID, HEADER_COUNTER_COL, row_idx)
-        if counter == "":
-            break
-        counters[clean_counter(counter)] = row_idx
-    return counters
-
-def open_header_row(session, row_idx):
+def open_header_row(session, counter):
+    row_idx = find_row(session, HEADER_TABLE_ID, HEADER_COUNTER_COL, counter,
+                       normalize=clean_counter)
+    if row_idx is None:
+        raise ValueError(f"GrC {counter} not found in header overview")
     description = get_cell_text(session, HEADER_TABLE_ID, HEADER_DESC_COL, row_idx)
-    print(f"Opening routing row {row_idx}: {description}")
-    session.findById(f"{HEADER_TABLE_ID}/txt[{HEADER_DESC_COL},{row_idx}]").setFocus()
-    session.findById("wnd[0]").sendVKey(2)
-
-def back_to_header(session):
-    # Back button x3: component allocation -> ... -> routing header overview
-    for _ in range(3):
-        session.findById("wnd[0]/tbar[0]/btn[3]").press()
-    if session.findById(HEADER_TABLE_ID, False) is None:
-        raise RuntimeError("Not back on routing header overview after 3x Back")
+    print(f"Opening GrC {counter} (row {row_idx}): {description}")
+    double_click(session, "wnd[0]", HEADER_TABLE_ID, HEADER_DESC_COL, row_idx)
 
 # ============================================================
 # COMPONENT ALLOCATION
@@ -178,114 +159,114 @@ def is_blank_comp_row(session, row_idx):
     return all(get_cell_text(session, COMP_TABLE_ID, col, row_idx) == ""
                for col in range(COMP_OPERATION_COL))
 
-def select_unassigned_components(session):
-    # Selects every non-blank row whose operation (txt[10]) is empty.
+def is_packaging(description):
+    # Case-insensitive "contains", so plurals match too (box -> boxes, sheet -> sheets)
+    text = description.lower()
+    return any(word in text for word in PACKAGING_WORDS)
+
+def select_components(session, packaging):
+    # Selects visible rows with an empty operation (txt[10]):
+    #   packaging=True  -> only rows whose description is packaging
+    #   packaging=False -> all remaining rows
+    # Stops at the first blank row. No scrolling.
+    if COMP_DESC_COL is None:
+        raise RuntimeError("COMP_DESC_COL not set: add the material description column index")
+
     table = session.findById(COMP_TABLE_ID)
-    total_rows = int(table.RowCount)
-    visible_rows = int(table.VisibleRowCount)
+    visible_rows = min(int(table.VisibleRowCount), int(table.RowCount))
     selected = []
 
-    position = 0
-    while position < total_rows:
-        session.findById(COMP_TABLE_ID).VerticalScrollbar.Position = position
-        first_row = int(session.findById(COMP_TABLE_ID).VerticalScrollbar.Position)
-
-        reached_end = False
-        for row_idx in range(min(visible_rows, total_rows - first_row)):
-            if is_blank_comp_row(session, row_idx):
-                reached_end = True
-                break
-            if get_cell_text(session, COMP_TABLE_ID, COMP_OPERATION_COL, row_idx) == "":
-                absolute_row = first_row + row_idx
-                session.findById(COMP_TABLE_ID).getAbsoluteRow(absolute_row).selected = True
-                selected.append(absolute_row)
-
-        if reached_end or first_row + visible_rows >= total_rows:
+    for row_idx in range(visible_rows):
+        if is_blank_comp_row(session, row_idx):
             break
-        position = first_row + visible_rows
+        description = get_cell_text(session, COMP_TABLE_ID, COMP_DESC_COL, row_idx)
+        unassigned = get_cell_text(session, COMP_TABLE_ID, COMP_OPERATION_COL, row_idx) == ""
+        select = unassigned and (is_packaging(description) or not packaging)
 
-    print(f"Selected component rows: {selected}")
+        # Set every row explicitly, so rows ticked in the previous pass are unticked
+        session.findById(COMP_TABLE_ID).getAbsoluteRow(row_idx).selected = select
+        if select:
+            selected.append(row_idx)
+            print(f"  select row {row_idx}: {description}")
+    else:
+        if int(table.RowCount) > visible_rows:
+            print(f"WARNING: table has more rows than visible ({visible_rows}); "
+                  "rows below were not checked")
+
     return selected
 
-def get_status_text(session):
-    return session.findById("wnd[0]/sbar").text.strip()
+def list_windows(session):
+    # Titles of all open windows of the session, e.g. ["wnd[0]: Change Routing...", "wnd[1]: ..."]
+    return [f"{w.Id.split('/')[-1]}: {w.Text}" for w in session.Children]
 
-def assign_to_operation(session, operation="0020"):
-    # Back to the top and focus the table (recording did chk[0,row].setFocus)
-    # so SAP picks up the row selection when btn[5] is pressed
-    session.findById(COMP_TABLE_ID).VerticalScrollbar.Position = 0
-    checkbox = session.findById(f"{COMP_TABLE_ID}/chk[0,0]", False)
-    if checkbox is not None:
-        checkbox.setFocus()
-
+def assign_to_operation(session, operation, last_row):
+    # Selected rows -> btn[5] -> type operation in popup -> Enter
+    session.findById(f"{COMP_TABLE_ID}/chk[0,{last_row}]").setFocus()
     session.findById("wnd[0]/tbar[1]/btn[5]").press()
+
+    # Diagnostics: show what SAP did after btn[5]
+    print(f"  after btn[5]: status='{get_status_text(session)}', windows={list_windows(session)}")
 
     field = session.findById("wnd[1]/usr/txt[0]", False)
     if field is None:
         raise RuntimeError(
             f"btn[5] did not open the operation popup. SAP status: '{get_status_text(session)}'")
     field.text = operation
-    session.findById("wnd[1]/tbar[0]/btn[0]").press()
-
-    if session.findById("wnd[1]", False) is not None:
-        raise RuntimeError(
-            f"Operation popup still open after OK. SAP status: '{get_status_text(session)}'")
-    press_enter(session)
+    session.findById("wnd[1]").sendVKey(0)      # Enter in the popup
     print(f"Assigned to {operation}. SAP status: '{get_status_text(session)}'")
+
+def assign_components(session):
+    # Pass 1: packaging -> 0030. Pass 2: everything still unassigned -> 0020.
+    # Returns {operation: [rows]} for the rows that were assigned.
+    assigned = {}
+    for operation, packaging in ((PACKAGING_OPERATION, True), (DEFAULT_OPERATION, False)):
+        print(f"Selecting rows for {operation}")
+        rows = select_components(session, packaging)
+        if rows:
+            assign_to_operation(session, operation, rows[-1])
+            assigned[operation] = rows
+    return assigned
 
 def save_routing(session):
     session.findById("wnd[0]/tbar[0]/btn[11]").press()
 
 # ============================================================
-# MAIN FLOW
+# MAIN FLOW: one routing = one CA02 entry, saved at the end
 # ============================================================
-def read_routing_groups(session, task: RoutingTask):
-    # Open CA02 once just to read the group popup
+def process_routing(session, routing: Routing, bom_row=8):
+    print("-" * 60)
+    print(f"Routing {routing.key}: {routing.description}")
+
     open_ca02(session)
-    open_routing(session, task.material, task.plant)
+    open_routing(session, routing.material, routing.plant)
     if has_group_popup(session):
-        task.groups = read_group_popup(session)
-    else:
-        # Only one group: SAP goes straight to the header overview
-        counters = list(get_header_counters(session))
-        task.groups = [RoutingGroup(group="", popup_row=0, counters=counters)]
-    for g in task.groups:
-        print(f"Group {g.group or '(single)'}: GrC {g.counters}")
+        select_group(session, routing.group)
+    # No popup = material has only one group, SAP opens the header overview directly
 
-def process_group(session, task: RoutingTask, group: RoutingGroup, bom_row=8):
-    # Each group is a separate CA02 entry, so it is saved before the next /NCA02
-    open_ca02(session)
-    open_routing(session, task.material, task.plant)
-    if has_group_popup(session):
-        select_popup_row(session, group.popup_row)
+    open_header_row(session, routing.counter)
+    open_component_allocation(session, bom_row)
 
-    header_counters = get_header_counters(session)
-    for counter in group.counters:
-        if counter not in header_counters:
-            raise ValueError(f"GrC {counter} of group {group.group} not in header overview")
-
-        print("-" * 60)
-        open_header_row(session, header_counters[counter])
-        open_component_allocation(session, bom_row)
-
-        if select_unassigned_components(session):
-            assign_to_operation(session, task.operation)
-        else:
-            print("No unassigned components, skipping")
-
-        back_to_header(session)
-        task.done.append(f"{group.group}/{counter}")
+    assigned = assign_components(session)
+    if not assigned:
+        # Nothing to change; the next /NCA02 leaves this screen without saving
+        routing.status = "SKIPPED"
+        routing.message = "No unassigned components"
+        return
 
     save_routing(session)
-    print(f"Saved group {group.group}: {session.findById('wnd[0]/sbar').text}")
-
-def assign_bom_to_routings(session, task: RoutingTask, bom_row=8):
-    read_routing_groups(session, task)
-    for group in task.groups:
-        process_group(session, task, group, bom_row)
+    summary = ", ".join(f"{op}: {len(rows)} rows" for op, rows in assigned.items())
+    routing.status = "SUCCESS"
+    routing.message = f"{summary}. {get_status_text(session)}"
+    print(f"Saved: {routing.message}")
 
 
 if __name__ == "__main__":
+    # Test one routing of 5016441210 (from the group popup screenshot)
     from connect import get_session
     session = slow_session(get_session())
-    assign_bom_to_routings(session, RoutingTask(material="5016441210"))
+    test = Routing(material="5013301300", group="M5013301", counter="45")
+    try:
+        process_routing(session, test)
+    except Exception as e:
+        test.status, test.message = "FAILED", str(e)
+    print(f"{test.key}: {test.status} {test.message}")
