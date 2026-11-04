@@ -6,10 +6,10 @@ from bom_create import open_cs01, open_bom_cs01, enter_items, get_created_alt_bo
 from models import BomHeader, BomItem
 
 # Output of unmerge_excel.py (run that first)
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM_unmerged.xlsx"
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_demo_fix_unit.xlsx"
 RESULT_FILE = INPUT_FILE.replace(".xlsx", "_result.xlsx")
 
-UNIT_COLUMN = "Unit"   # TODO: change to the real unit column name in your Excel
+UNIT_COLUMN = "Unit after"   # TODO: change to the real unit column name in your Excel
 
 
 def build_headers(df):

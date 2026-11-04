@@ -5,12 +5,11 @@ from reader import read_boms, validate_boms, print_boms
 from bom import open_cs02, open_bom, find_component_row, set_text, press_enter, save_bom, BOM_TABLE_ID
 from bom_create import open_cs01, open_bom_cs01, enter_items, get_created_alt_bom, format_quantity, QUANTITY_COL
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM.xlsx"
-
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_demo.xlsx"
 # DRY_RUN = read + validate + preview, no SAP
 # TEST    = fill SAP screens for the first TEST_LIMIT BOMs, do NOT save
 # RUN     = fill and save every BOM
-MODE = "DRY_RUN"
+MODE = "RUN"
 TEST_LIMIT = 1
 
 # Scrap and base quantity steps for CS01 are not recorded yet.
