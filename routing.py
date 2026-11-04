@@ -1,47 +1,5 @@
 from bom import clean_component, set_text, press_enter
 from models import Routing
-import time
-
-# TEMPORARY: wait after every SAP action so the run can be observed. 0 = normal speed.
-STEP_DELAY = 0
-
-class SlowSAP:
-    # Wraps a SAP GUI object: sleeps STEP_DELAY after actions, reads are not delayed
-    ACTIONS = {"press", "sendVKey", "setFocus", "select"}
-    SET_ACTIONS = {"text", "selected", "Position", "caretPosition"}
-
-    def __init__(self, obj):
-        object.__setattr__(self, "_obj", obj)
-
-    def __getattr__(self, name):
-        value = getattr(self._obj, name)
-        # COM objects (Info, VerticalScrollbar, ...) are callable too, so check them first
-        if hasattr(value, "_oleobj_"):
-            return SlowSAP(value)
-        if callable(value):
-            def call(*args):
-                result = value(*args)
-                if name in self.ACTIONS:
-                    print(f"  [slow] {name}{args}")
-                    time.sleep(STEP_DELAY)
-                return wrap(result)
-            return call
-        return value
-
-    def __setattr__(self, name, value):
-        setattr(self._obj, name, value)
-        if name in self.SET_ACTIONS:
-            print(f"  [slow] {name} = {value!r}")
-            time.sleep(STEP_DELAY)
-
-def wrap(value):
-    # Wrap SAP COM objects (findById results, rows, scrollbars); leave str/int/None as is
-    if hasattr(value, "_oleobj_"):
-        return SlowSAP(value)
-    return value
-
-def slow_session(session):
-    return SlowSAP(session) if STEP_DELAY > 0 else session
 
 # Popup after Enter: "Entry Option: Group" - all groups and GrC of the material
 GROUP_POPUP_TABLE_ID = "wnd[1]/usr/tblSAPLCPSLTCTRL_2110"
@@ -128,6 +86,9 @@ def open_routing(session, material, plant="1901"):
 
 def has_group_popup(session):
     return session.findById(GROUP_POPUP_TABLE_ID, False) is not None
+
+def has_header_overview(session):
+    return session.findById(HEADER_TABLE_ID, False) is not None
 
 def select_group(session, group):
     # Group is only on the first row of each group; that row opens the group
@@ -243,27 +204,39 @@ def process_routing(session, routing: Routing, bom_row=8):
         select_group(session, routing.group)
     # No popup = material has only one group, SAP opens the header overview directly
 
-    open_header_row(session, routing.counter)
+    note = ""
+    if has_header_overview(session):
+        open_header_row(session, routing.counter)
+    else:
+        # SAP opened the only routing of the group directly (operation overview).
+        # The GrC can't be checked on screen, so only continue if one routing is expected.
+        if routing.group_size > 1:
+            raise RuntimeError(
+                f"Header overview not shown, but group {routing.group} has "
+                f"{routing.group_size} routings. SAP status: '{get_status_text(session)}'")
+        note = "Single routing, no header overview. "
+        print(note.strip())
+
     open_component_allocation(session, bom_row)
 
     assigned = assign_components(session)
     if not assigned:
         # Nothing to change; the next /NCA02 leaves this screen without saving
         routing.status = "SKIPPED"
-        routing.message = "No unassigned components"
+        routing.message = f"{note}No unassigned components"
         return
 
     save_routing(session)
     summary = ", ".join(f"{op}: {len(rows)} rows" for op, rows in assigned.items())
     routing.status = "SUCCESS"
-    routing.message = f"{summary}. {get_status_text(session)}"
+    routing.message = f"{note}{summary}. {get_status_text(session)}"
     print(f"Saved: {routing.message}")
 
 
 if __name__ == "__main__":
-    # Test one routing of 5016441210 (from the group popup screenshot)
-    from connect import get_session
-    session = slow_session(get_session())
+    # Test one routing: python routing.py [slow]
+    from connect import get_session, slow_from_args
+    session = get_session(slow=slow_from_args())
     test = Routing(material="5013301300", group="M5013301", counter="45")
     try:
         process_routing(session, test)

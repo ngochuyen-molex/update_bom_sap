@@ -46,12 +46,16 @@ def load_routings(materials, plant="1901"):
     finally:
         conn.close()
 
+    # GrC per material + group: SAP skips the header overview when a group has only one
+    sizes = df.groupby(["MATERIAL", "ROUTING_GROUP"])["GROUP_COUNTER"].transform("count")
+
     return [
         Routing(
             material=row.MATERIAL,
             group=row.ROUTING_GROUP,
             counter=row.GROUP_COUNTER or "0",
             description=(row.ROUTING_DESCRIPTION or "").strip(),
-            plant=plant)
-        for row in df.itertuples(index=False)
+            plant=plant,
+            group_size=int(size))
+        for row, size in zip(df.itertuples(index=False), sizes)
     ]

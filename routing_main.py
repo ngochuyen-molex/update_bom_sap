@@ -1,8 +1,8 @@
 import pandas as pd
-from connect import get_session, SAPConnectionError
+from connect import get_session, slow_from_args, SAPConnectionError
 from excel_utils import load_excel
 from bom import clean_component
-from routing import process_routing, slow_session
+from routing import process_routing
 from routing_sf import load_routings
 
 # Result file of create_main.py: only materials with a newly created BOM
@@ -45,7 +45,7 @@ def save_results(routings, missing):
 
 def main():
     try:
-        session = slow_session(get_session())
+        session = get_session(slow=slow_from_args())    # python routing_main.py slow
         print(f"Connected to SAP system {session.Info.SystemName}")
 
         materials = get_materials(load_excel(INPUT_FILE))
