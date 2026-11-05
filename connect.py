@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import time
 import win32com.client
 
@@ -9,9 +10,58 @@ SAP_LOGON_PATH = (
 
 SAP_CONNECTION_NAME = "M04 [SSO]"
 
+# Slow mode: seconds to wait after every SAP action (press, Enter, typing, selecting)
+STEP_DELAY = 0.5
 
 class SAPConnectionError(Exception):
     pass
+
+
+class SlowSAP:
+    """Wraps a SAP GUI object: waits STEP_DELAY after actions, reads are not delayed."""
+    ACTIONS = {"press", "sendVKey", "setFocus", "select"}
+    SET_ACTIONS = {"text", "selected", "Position", "caretPosition", "key"}
+
+    def __init__(self, obj):
+        object.__setattr__(self, "_obj", obj)
+
+    def __getattr__(self, name):
+        value = getattr(self._obj, name)
+        # COM objects (Info, VerticalScrollbar, ...) are callable too, so check them first
+        if hasattr(value, "_oleobj_"):
+            return SlowSAP(value)
+        if callable(value):
+            def call(*args):
+                result = value(*args)
+                if name in self.ACTIONS:
+                    print(f"  [slow] {name}{args}")
+                    time.sleep(STEP_DELAY)
+                return _wrap(result)
+            return call
+        return value
+
+    def __setattr__(self, name, value):
+        setattr(self._obj, name, value)
+        if name in self.SET_ACTIONS:
+            print(f"  [slow] {name} = {value!r}")
+            time.sleep(STEP_DELAY)
+
+    def __iter__(self):
+        # Collections (session.Children, usr.Children): Python looks up __iter__ on the class
+        for item in self._obj:
+            yield _wrap(item)
+
+
+def _wrap(value):
+    # Wrap SAP COM objects (findById results, rows, scrollbars); leave str/int/None as is
+    if hasattr(value, "_oleobj_"):
+        return SlowSAP(value)
+    return value
+
+
+def slow_from_args():
+    """True if the script was started with 'slow', e.g. python routing_main.py slow"""
+    return "slow" in sys.argv
 
 
 def _is_sap_logon_running():
@@ -59,7 +109,16 @@ def _open_connection(application):
     return connection
 
 
-def get_session():
+def get_session(slow=False):
+    """SAP session. slow=True waits STEP_DELAY seconds after every action."""
+    session = _get_session()
+    if slow:
+        print(f"Slow mode: {STEP_DELAY}s after every SAP action")
+        return SlowSAP(session)
+    return session
+
+
+def _get_session():
     try:
         # Launch SAP Logon if not running
         _launch_sap_logon()
