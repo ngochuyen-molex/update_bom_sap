@@ -27,3 +27,37 @@ class BomHeader:
     @property
     def excel_rows(self):
         return [item.excel_row for item in self.items]
+
+
+@dataclass
+class Routing:
+    material: str
+    group: str                  # PLNNR, e.g. "M0164412"
+    counter: str                # GrC / PLNAL without leading zeros, e.g. "22"
+    description: str = ""       # KTEXT
+    plant: str = "1901"
+    group_size: int = 1         # number of GrC of this material + group (from Snowflake)
+    status: str = ""            # SUCCESS / SKIPPED / FAILED
+    message: str = ""
+
+    @property
+    def key(self):
+        return f"{self.material} {self.group}/{self.counter}"
+
+
+@dataclass
+class ProductionVersion:
+    material: str
+    group: str                  # routing group (PLNNR)
+    counter: str                # group counter (PLNAL)
+    description: str            # routing description
+    alt_bom: str
+    bom_usage: str = "1"
+    text: str = ""              # production version text = description + " B" + alt BOM
+    version: str = ""           # new version SAP gets, e.g. "0010"
+    status: str = ""            # SUCCESS / FAILED
+    message: str = ""
+
+    @property
+    def key(self):
+        return f"{self.material} {self.group}/{self.counter}"
