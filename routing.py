@@ -144,8 +144,11 @@ def select_components(session, packaging):
         unassigned = get_cell_text(session, COMP_TABLE_ID, COMP_OPERATION_COL, row_idx) == ""
         select = unassigned and (is_packaging(description) or not packaging)
 
-        # Set every row explicitly, so rows ticked in the previous pass are unticked
-        session.findById(COMP_TABLE_ID).getAbsoluteRow(row_idx).selected = select
+        # Tick rows to assign; untick only rows that are still ticked (e.g. from pass 1).
+        # Rows that are already unticked are left alone (no extra SAP actions).
+        table_row = session.findById(COMP_TABLE_ID).getAbsoluteRow(row_idx)
+        if select or table_row.selected:
+            table_row.selected = select
         if select:
             selected.append(row_idx)
             print(f"  select row {row_idx}: {description}")
@@ -220,13 +223,13 @@ def process_routing(session, routing: Routing, bom_row=8):
     open_component_allocation(session, bom_row)
 
     assigned = assign_components(session)
+    save_routing(session)       # also when nothing was assigned
     if not assigned:
-        # Nothing to change; the next /NCA02 leaves this screen without saving
         routing.status = "SKIPPED"
-        routing.message = f"{note}No unassigned components"
+        routing.message = f"{note}No unassigned components, saved. {get_status_text(session)}"
+        print(routing.message)
         return
 
-    save_routing(session)
     summary = ", ".join(f"{op}: {len(rows)} rows" for op, rows in assigned.items())
     routing.status = "SUCCESS"
     routing.message = f"{note}{summary}. {get_status_text(session)}"
