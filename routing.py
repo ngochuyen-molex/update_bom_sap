@@ -17,10 +17,60 @@ COMP_TABLE_ID = "wnd[0]/usr/tblSAPLCMDITCTRL_1000"
 COMP_OPERATION_COL = 10     # txt[10,row] = assigned operation ("0030", ...)
 COMP_DESC_COL = 13          # txt[13,row] = material description
 
-# Operation per component: packaging -> 0030, everything else -> 0020
+# "Choose Alternative BOM" popup after btn[7]: list, element = txt[<row>, <column position>]
+BOM_POPUP_ID = "wnd[1]/usr/sub/1"
+BOM_POPUP_ALT_COL = 19      # txt[row,19] = AltBOM
+
+# Operation per component (first match wins):
+#   packaging                                         -> 0030
+#   lubricant AND op 0030 work center in YMHI list    -> 0030
+#   everything else                                   -> 0020
 DEFAULT_OPERATION = "0020"
 PACKAGING_OPERATION = "0030"
 PACKAGING_WORDS = ("carton", "sheet", "bag", "silica", "bubble", "box")
+LUBRICANT_WORDS = ("lubricant",)
+LUBRICANT_0030_WORK_CENTERS = ("YMHI", "YMHI-1")     # exact match
+
+# ============================================================
+# RULES (one place each, so a rule change is a one-line edit)
+# ============================================================
+def is_trial(text):
+    # Trial routing (description) / trial alt BOM (alt BOM text), covers MDTRIAL
+    return "TRIAL" in (text or "").upper()
+
+def is_packaging(description):
+    # Case-insensitive "contains", so plurals match too (box -> boxes, sheet -> sheets)
+    text = (description or "").lower()
+    return any(word in text for word in PACKAGING_WORDS)
+
+def is_lubricant(description):
+    text = (description or "").lower()
+    return any(word in text for word in LUBRICANT_WORDS)
+
+def is_lubricant_0030_routing(op_0030_wc):
+    return (op_0030_wc or "").strip().upper() in LUBRICANT_0030_WORK_CENTERS
+
+def planned_operation(description, op_0030_wc):
+    # Operation for an unassigned component; returns (operation, reason)
+    if is_packaging(description):
+        return PACKAGING_OPERATION, "packaging"
+    if is_lubricant(description) and is_lubricant_0030_routing(op_0030_wc):
+        return PACKAGING_OPERATION, f"lubricant, op 0030 = {op_0030_wc}"
+    return DEFAULT_OPERATION, ""
+
+def skip_reason(routing: Routing):
+    # Why this routing x alt BOM is not opened in SAP ("" = process it)
+    if routing.deleted:
+        return "Deleted routing"
+    if is_trial(routing.description):
+        return "Trial routing"
+    if is_trial(routing.alt_bom_text):
+        return "Trial alt BOM"
+    if routing.total_items == 0:
+        return "No BOM items (Snowflake)"
+    if routing.unassigned == 0:
+        return f"Already assigned (Snowflake): {routing.total_items} of {routing.total_items} components assigned"
+    return ""
 
 # ============================================================
 # BASIC HELPERS
@@ -109,30 +159,43 @@ def open_header_row(session, counter):
 # ============================================================
 # COMPONENT ALLOCATION
 # ============================================================
-def open_component_allocation(session, bom_row=8):
-    # bom_row = row of the BOM in the popup (from recording: row 8)
+def open_component_allocation(session, routing: Routing):
+    # btn[7] -> "Choose Alternative BOM" popup -> double-click the row with the wanted alt BOM.
+    # Rows are found by value (AltBOM column), not by position.
     session.findById("wnd[0]/tbar[1]/btn[7]").press()
-    session.findById(f"wnd[1]/usr/sub/1/txt[1,{bom_row}]").setFocus()
-    session.findById("wnd[1]").sendVKey(2)
+
+    if session.findById("wnd[1]", False) is None:
+        # No popup: SAP opened the only BOM directly
+        if routing.bom_count > 1:
+            raise RuntimeError(
+                f"BOM popup not shown, but material has {routing.bom_count} active alt BOMs. "
+                f"SAP status: '{get_status_text(session)}'")
+        print("No BOM popup, single BOM opened directly")
+        return
+
+    wanted = clean_counter(routing.alt_bom)
+    row = 0
+    while True:
+        cell = session.findById(f"{BOM_POPUP_ID}/txt[{row},{BOM_POPUP_ALT_COL}]", False)
+        if cell is None:
+            break
+        if clean_counter(cell.text) == wanted:
+            print(f"BOM popup: alt BOM {wanted} on row {row}")
+            cell.setFocus()
+            session.findById("wnd[1]").sendVKey(2)
+            return
+        row += 1
+    raise ValueError(f"Alt BOM {wanted} not found in BOM popup ({row} rows)")
 
 def is_blank_comp_row(session, row_idx):
     # Blank = no text in any cell before the operation column
     return all(get_cell_text(session, COMP_TABLE_ID, col, row_idx) == ""
                for col in range(COMP_OPERATION_COL))
 
-def is_packaging(description):
-    # Case-insensitive "contains", so plurals match too (box -> boxes, sheet -> sheets)
-    text = description.lower()
-    return any(word in text for word in PACKAGING_WORDS)
-
-def select_components(session, packaging):
-    # Selects visible rows with an empty operation (txt[10]):
-    #   packaging=True  -> only rows whose description is packaging
-    #   packaging=False -> all remaining rows
-    # Stops at the first blank row. No scrolling.
-    if COMP_DESC_COL is None:
-        raise RuntimeError("COMP_DESC_COL not set: add the material description column index")
-
+def select_components(session, operation, op_0030_wc):
+    # Selects visible rows with an empty operation (txt[10]) whose planned operation
+    # is `operation` (pass 1: 0030). For the default operation (pass 2: 0020) every
+    # remaining unassigned row is selected. Stops at the first blank row. No scrolling.
     table = session.findById(COMP_TABLE_ID)
     visible_rows = min(int(table.VisibleRowCount), int(table.RowCount))
     selected = []
@@ -142,7 +205,8 @@ def select_components(session, packaging):
             break
         description = get_cell_text(session, COMP_TABLE_ID, COMP_DESC_COL, row_idx)
         unassigned = get_cell_text(session, COMP_TABLE_ID, COMP_OPERATION_COL, row_idx) == ""
-        select = unassigned and (is_packaging(description) or not packaging)
+        planned, reason = planned_operation(description, op_0030_wc)
+        select = unassigned and (operation == DEFAULT_OPERATION or planned == operation)
 
         # Tick rows to assign; untick only rows that are still ticked (e.g. from pass 1).
         # Rows that are already unticked are left alone (no extra SAP actions).
@@ -150,8 +214,8 @@ def select_components(session, packaging):
         if select or table_row.selected:
             table_row.selected = select
         if select:
-            selected.append(row_idx)
-            print(f"  select row {row_idx}: {description}")
+            selected.append((row_idx, reason))
+            print(f"  select row {row_idx}: {description}" + (f" ({reason})" if reason else ""))
     else:
         if int(table.RowCount) > visible_rows:
             print(f"WARNING: table has more rows than visible ({visible_rows}); "
@@ -179,27 +243,37 @@ def assign_to_operation(session, operation, last_row):
     session.findById("wnd[1]").sendVKey(0)      # Enter in the popup
     print(f"Assigned to {operation}. SAP status: '{get_status_text(session)}'")
 
-def assign_components(session):
-    # Pass 1: packaging -> 0030. Pass 2: everything still unassigned -> 0020.
-    # Returns {operation: [rows]} for the rows that were assigned.
+def assign_components(session, op_0030_wc=""):
+    # Pass 1: planned 0030 (packaging, lubricant on YMHI routings).
+    # Pass 2: everything still unassigned -> 0020.
+    # Returns {operation: [(row, reason), ...]} for the rows that were assigned.
     assigned = {}
-    for operation, packaging in ((PACKAGING_OPERATION, True), (DEFAULT_OPERATION, False)):
+    for operation in (PACKAGING_OPERATION, DEFAULT_OPERATION):
         print(f"Selecting rows for {operation}")
-        rows = select_components(session, packaging)
+        rows = select_components(session, operation, op_0030_wc)
         if rows:
-            assign_to_operation(session, operation, rows[-1])
+            assign_to_operation(session, operation, rows[-1][0])
             assigned[operation] = rows
     return assigned
+
+def summarize(assigned):
+    # {"0030": [(r, "packaging"), (r, "lubricant, ...")], "0020": [...]} -> "0030: 2 rows (1 lubricant), 0020: 5 rows"
+    parts = []
+    for operation, rows in assigned.items():
+        lubricant = sum(1 for _, reason in rows if reason.startswith("lubricant"))
+        extra = f" ({lubricant} lubricant)" if lubricant else ""
+        parts.append(f"{operation}: {len(rows)} rows{extra}")
+    return ", ".join(parts)
 
 def save_routing(session):
     session.findById("wnd[0]/tbar[0]/btn[11]").press()
 
 # ============================================================
-# MAIN FLOW: one routing = one CA02 entry, saved at the end
+# MAIN FLOW: one routing x alt BOM = one CA02 entry, saved at the end
 # ============================================================
-def process_routing(session, routing: Routing, bom_row=8):
+def process_routing(session, routing: Routing):
     print("-" * 60)
-    print(f"Routing {routing.key}: {routing.description}")
+    print(f"Routing {routing.key}: {routing.description} | op 0030 WC: {routing.op_0030_wc or '-'}")
 
     open_ca02(session)
     open_routing(session, routing.material, routing.plant)
@@ -220,27 +294,26 @@ def process_routing(session, routing: Routing, bom_row=8):
         note = "Single routing, no header overview. "
         print(note.strip())
 
-    open_component_allocation(session, bom_row)
+    open_component_allocation(session, routing)
 
-    assigned = assign_components(session)
+    assigned = assign_components(session, routing.op_0030_wc)
     save_routing(session)       # also when nothing was assigned
     if not assigned:
         routing.status = "SKIPPED"
-        routing.message = f"{note}No unassigned components, saved. {get_status_text(session)}"
+        routing.message = f"{note}No unassigned components on screen, saved. {get_status_text(session)}"
         print(routing.message)
         return
 
-    summary = ", ".join(f"{op}: {len(rows)} rows" for op, rows in assigned.items())
     routing.status = "SUCCESS"
-    routing.message = f"{note}{summary}. {get_status_text(session)}"
+    routing.message = f"{note}{summarize(assigned)}. {get_status_text(session)}"
     print(f"Saved: {routing.message}")
 
 
 if __name__ == "__main__":
-    # Test one routing: python routing.py [slow]
+    # Test one routing x alt BOM: python routing.py [slow]
     from connect import get_session, slow_from_args
     session = get_session(slow=slow_from_args())
-    test = Routing(material="5013301300", group="M5013301", counter="45")
+    test = Routing(material="5013301300", group="M5013301", counter="45", alt_bom="2", bom_count=2)
     try:
         process_routing(session, test)
     except Exception as e:
