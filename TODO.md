@@ -95,3 +95,6 @@ cleanlayout:
  bom.py         → shared helpers (cleaning + SAP basics)
     bom_change.py  → CS02 functions (moved out of bom.py)
     bom_create.py  → CS01 functions
+
+## CREATE BOM: 
+- solve correct base quantity for new bom creation

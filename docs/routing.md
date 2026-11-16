@@ -1,270 +1,326 @@
-# CA02 - Assign new BOM components to routings
+# CA02 - Assign BOM components to routings
 
-For every routing of a material, assigns the unassigned components of the
-newly created BOM (from `create_main.py`) to an operation in CA02:
+Part of the chain create BOM -> assign -> production version: see
+[`workflow.md`](workflow.md) for the phases and the shared workbook.
 
-- **0030** if the component description contains a packaging word
-  (carton, sheet, bag, silica, bubble, box)
-- **0020** for every other component
+> **Snowflake lags SAP by ~20 minutes.** A BOM created minutes ago is not in MLX_DATALAKE
+> yet. That's why there are two tasks with the same SAP logic but a different work list:
+> **"newbom"** (just-created BOMs: new alt BOM from the phase 1 columns of `Sheet1`, routings from
+> Snowflake) and **"altbom"** (existing BOMs: all alt BOMs and allocation from Snowflake).
+> Don't run "altbom" on BOMs created less than ~20 min ago. Details: `workflow.md` 0.
 
-The list of routings comes from Snowflake (MLX_DATALAKE). Each routing is opened,
-assigned and saved on its own, so there is no backtracking between routings.
+For every **routing x active alternative BOM** of a list of materials, assigns the
+components that are **not assigned yet** to an operation in CA02:
+
+| Component description contains | Routing condition | Operation |
+|---|---|---|
+| packaging word: carton, sheet, bag, silica, bubble, box | always | **0030** |
+| `LUBRICANT` | operation 0030 work center is exactly `YMHI` or `YMHI-1` | **0030** |
+| anything else | - | **0020** |
+
+The work list (routings, alt BOMs, work centers, current allocation) comes from
+Snowflake (MLX_DATALAKE). Entries that don't need work are skipped and logged.
+Each remaining entry is opened, assigned and saved on its own.
 
 | File | Role |
 |---|---|
-| `routing_main.py` | Runner. Reads the Excel, gets the routings from Snowflake, loops routings, writes results. **Run this.** |
-| `routing.py` | SAP screen steps (CA02). `python routing.py` tests one routing (5016441210, M0164412 / 22). |
-| `routing_sf.py` | Snowflake query: list of routings per material. |
-| `models.py` | `Routing` dataclass (material, group, GrC, description, status, message). |
-
-- **Input:** result file of `create_main.py` (`create_bom_final.xlsx`), rows with `STATUS = SUCCESS`.
-- **Output:** `create_bom_final_routing.xlsx`, one row per routing:
-  `Material`, `Group`, `GrC`, `Description`, `STATUS`, `MESSAGE`. The input file is not changed.
+| `routing_main.py` | Runner: reads the input file, builds the work list, runs SAP, writes the `Result` sheet. **Run this.** |
+| `routing.py` | Rules + SAP screen steps (CA02). `python routing.py` tests one routing x alt BOM. |
+| `routing_sf.py` | Snowflake queries (batched) and work list. |
+| `models.py` | `Routing` dataclass (one routing x alt BOM). |
+| `connect.py` | SAP session, `slow` mode. |
 
 ---
 
-## Logic flow
+## 1. Usage
+
+> **IMPORTANT: close the input Excel file before every run** (`check`, normal run,
+> `continue`). The script writes the `Result` sheet into that file during the run.
+> If the file is open in Excel, Windows locks it and saving fails
+> (`Could not save ... Close it in Excel.` / `Cannot write ...`). In that case the
+> SAP changes are made, but the `Result` sheet is not updated. Close the file and
+> run `continue`; entries already done in SAP are found again as nothing to assign.
+> Don't open the file while a run is going on; open it only after the run ends.
+
+```powershell
+cd C:\Users\nguyeb3\Downloads\SAP_automation\change_bom
+python routing_main.py altbom check      # work list -> Result sheet, no SAP
+python routing_main.py altbom            # work list -> Result sheet -> SAP run
+python routing_main.py altbom continue   # carry on with the Result sheet (no Snowflake)
+```
+
+| Option | Meaning |
+|---|---|
+| `altbom` | task "altbom" (input `md_assign_component.xlsx`). Without it: task "newbom" (see 2.2) |
+| *(none)* | get the work list from Snowflake, write `Result` + `Preview`, run SAP |
+| `check` | get the work list from Snowflake, write `Result` + `Preview`, **stop** (no SAP) |
+| `continue` | read `Result` (**no Snowflake**), process only `PENDING` and `FAILED` rows, update them in place. `retry` does the same. `Preview` is not rebuilt |
+| `fresh` | rebuild the result sheet (+ `Preview`) although it already exists; SUCCESS rows of the old sheet are kept |
+| `slow` | wait after every SAP action (`STEP_DELAY` in `connect.py`), to watch the run |
+
+Options can be combined in any order, e.g. `python routing_main.py altbom continue slow`.
+
+### Typical workflow
+
+1. Close the input file in Excel.
+2. `python routing_main.py altbom check` -> look at the `Result` sheet (what is `PENDING`, what is `SKIPPED` and why).
+3. `python routing_main.py altbom continue slow` -> watch the first entries in SAP, then stop (Ctrl+C).
+4. `python routing_main.py altbom continue` -> the rest.
+5. Run `continue` again until no `FAILED` rows are left (or fix the cause first).
+
+### Safety
+
+- If `Result` already exists, a normal run **stops** and points to `continue` / `fresh`,
+  so the progress of an earlier run is not overwritten by accident.
+- `Result` is saved every 5 processed entries (`SAVE_EVERY`) and also when the run stops
+  (Ctrl+C, crash). Entries not reached stay `PENDING`, so `continue` picks them up.
+- Each save writes a temp copy first and then replaces the file, so a crash can't leave
+  it half-written. The input file must be **closed in Excel** during the run.
+
+---
+
+## 2. Input
+
+### 2.1 Task "altbom" (`python routing_main.py altbom ...`)
+
+`C:\Users\nguyeb3\Downloads\md_assign_component.xlsx`, **first sheet**:
+
+| Column | Required | Notes |
+|---|---|---|
+| `Material` | yes | header in row 1, data from row 2; with or without leading zeros; duplicates and blanks ignored |
+
+Other columns are ignored. Plant (1901), routings, alt BOMs, work centers and allocation
+come from Snowflake.
+
+### 2.2 Task "newbom" (`python routing_main.py ...` without `altbom`)
+
+Phase 2 of the chain create BOM -> assign -> production version, see
+[`workflow.md`](workflow.md). Workbook `CREATE_BOM.xlsx` (`workbook.CHAIN_FILE`):
+materials and the **new alt BOM** from the first sheet (`STATUS = SUCCESS`, column
+`Created Alt BOM`), routings from Snowflake; result in sheet `Routing Result`
+(no `Preview`). Only the new alt BOM is assigned, and its allocation is not checked in
+Snowflake (the new BOM is not in MLX_DATALAKE yet, ~20 min lag): every non-deleted,
+non-trial routing is opened and the screen decides.
+
+Input files are set in `TASKS` at the top of `routing_main.py`. Sections 3 and 4.1 below
+describe the task "altbom".
+
+---
+
+## 3. Output - `Result` and `Preview` sheets
+
+Written into the **input file**, after the first sheet. The first sheet (the source) is
+**never changed**.
+
+### `Result` sheet
+
+One row per **routing x alt BOM** (plus one row per material without routing / alt BOM):
+
+| Column | Example | Meaning |
+|---|---|---|
+| Material | 5052760489 | |
+| Group | M0527604 | routing group (PLNNR) |
+| GrC | 16 | group counter (PLNAL) |
+| Description | 5052760489 - MF15-17 - L505276A | routing description |
+| Alt BOM | 2 | |
+| Alt BOM Text | BOM 2 - REGRIND | |
+| Op 0030 WC | YMHI-1 | work center of operation 0030 (lubricant rule) |
+| Unassigned (Snowflake) | 5 | unassigned components when the work list was built |
+| STATUS | see below | |
+| MESSAGE | `0030: 3 rows (1 lubricant), 0020: 2 rows. <SAP status>` | result or reason |
+| Updated At | 2026-11-12 14:05:31 | last change of this row |
+
+| STATUS | Meaning |
+|---|---|
+| `PENDING` | needs assignment, not processed yet |
+| `SKIPPED` | not opened in SAP, or nothing to assign on screen; reason in MESSAGE |
+| `SUCCESS` | assigned and saved |
+| `FAILED` | error; text in MESSAGE. Retried by `continue` |
+
+### 3.1 `Preview` sheet (after `Result`)
+
+Planned operation per component, **only for the `PENDING` entries** (those that will be
+opened in SAP). One row per routing x alt BOM x BOM item:
+
+| Column | Example |
+|---|---|
+| Material / Group / GrC / Alt BOM | 5052760489 / M0527604 / 16 / 2 |
+| Op 0030 WC | YMHI-1 |
+| Item / Component / Component Description | 0040 / 2027490008 / LUBRICANT HANARL MLX-79A |
+| Current Operation | empty = not assigned yet, else e.g. `0020` |
+| Planned | `0030 (packaging)`, `0030 (lubricant, op 0030 = YMHI-1)`, `0020`, `already 0020` |
+
+- Built **once**, when the work list is built (`check`, normal run, `fresh`), from Snowflake
+  data that is loaded anyway. No extra queries, no SAP steps.
+- `continue` does **not** rebuild it (no Snowflake); it shows the plan from when the work
+  list was built. `Result` shows what was actually done.
+- It's the plan from the rules; the SAP run applies the same rules (`planned_operation`)
+  to what it sees on screen.
+- Sheet order is always: source sheet, `Result`, `Preview`.
+
+---
+
+## 4. Logic
+
+### 4.1 Work list (`routing_sf.py`, `load_assignment_worklist`)
 
 ```
-CONNECT to SAP
-READ Excel file
-SET materialList to unique Parent Materials WHERE STATUS = SUCCESS
-SET routingList to routings of materialList FROM Snowflake   # material, group, GrC, description
+READ materials (first sheet of the input file)
+QUERY Snowflake (batches of 500 materials):
+    routings     MAPL + PLKO          active standard routings at 1901, latest change state, DELKZ
+    alt BOMs     MAST + STKO          usage 1, plant 1901, latest change state (STKOZ), status 01
+    op 0030 WC   PLAS + PLPO + CRHD   work center of operation 0030 per routing
+    allocation   STAS + STPO + PLMZ   per routing x alt BOM x BOM item: operation ("" = not assigned)
+BUILD entries = every routing x every active alt BOM of the material
+FOR EACH entry: STATUS = SKIPPED (reason) or PENDING
+```
 
-FOR EACH routing IN routingList
-    TRY
-        GO TO CA02
-        ENTER material and 1901, PRESS Enter
+### 4.2 Skip rules (`routing.py`, `skip_reason`) - first match wins
 
-        IF group popup is shown THEN
-            FIND row WHERE Group = routing.group
-            IF not found THEN RAISE "Group not found" END IF
-            DOUBLE-CLICK that row
-        END IF
+| # | Rule | MESSAGE |
+|---|---|---|
+| 1 | Routing deletion indicator `PLKO.DELKZ = 'X'` | `Deleted routing` |
+| 2 | Routing description contains `TRIAL` (any case, covers `MDTRIAL`) | `Trial routing` |
+| 3 | Alt BOM text contains `TRIAL` | `Trial alt BOM` |
+| 4 | Alt BOM has no items | `No BOM items (Snowflake)` |
+| 5 | All components already assigned (Snowflake) | `Already assigned (Snowflake): 3 of 3 components assigned` |
+| - | Material without routing or active alt BOM | `No routing or no active alt BOM (usage 1) in MLX_DATALAKE` |
 
-        FIND header row WHERE GrC = routing.GrC
-        IF not found THEN RAISE "GrC not found" END IF
-        DOUBLE-CLICK that row
+Rule 5 depends on Snowflake being up to date. The data lake can lag behind SAP; during
+the run the script still checks the operation on screen before ticking a row.
 
-        PRESS btn[7], DOUBLE-CLICK BOM row 8          # component allocation opens
+### 4.3 SAP run per entry (`routing.py`, `process_routing`)
 
-        # Pass 1: packaging -> 0030
-        SELECT rows WHERE operation is empty AND description is packaging
-        IF any selected THEN
-            PRESS btn[5], TYPE "0030", PRESS Enter
-        END IF
-
-        # Pass 2: everything still unassigned -> 0020
-        SELECT rows WHERE operation is empty
-        IF any selected THEN
-            PRESS btn[5], TYPE "0020", PRESS Enter
-        END IF
-
-        IF nothing was assigned THEN
-            SET status to SKIPPED                     # no save, next /NCA02 leaves the screen
-        ELSE
-            PRESS Save
-            SET status to SUCCESS
-        END IF
-    CATCH error
-        SET status to FAILED, message to error text
-    END TRY
-
-    WRITE results to Excel
+```
+FOR EACH entry WITH STATUS PENDING / FAILED
+    GO TO CA02, ENTER material + 1901, Enter                         Screen 1
+    IF group popup THEN double-click row with Group = entry.group   Screen 2
+    IF header overview THEN double-click row with GrC = entry.GrC   Screen 3
+    ELSE IF group has > 1 routing (Snowflake) THEN FAILED
+    ELSE log "Single routing, no header overview"
+    PRESS btn[7]
+    IF BOM popup THEN double-click row with AltBOM = entry.alt_bom  Screen 4
+    ELSE IF material has > 1 active alt BOM THEN FAILED
+    Pass 1: tick rows with empty operation AND planned 0030 -> btn[5] -> 0030 -> Enter   Screen 5
+    Pass 2: tick rows with empty operation                  -> btn[5] -> 0020 -> Enter
+    SAVE (also when nothing was assigned)
+    SUCCESS ("0030: x rows, 0020: y rows") / SKIPPED ("No unassigned components on screen")
+    on any error: FAILED + error text
 END FOR
 ```
 
-One routing = one CA02 entry = one save. A failure only affects that routing;
-the run continues with the next one.
+One CA02 entry and one save per routing x alt BOM, so a failure only affects that entry.
 
----
+### 4.4 Operation per component (`routing.py`, `planned_operation`)
 
-## Step 1 - Routing list from Snowflake (`routing_sf.py`)
-
-`load_routings(materials)` returns one `Routing` per material + group + GrC at plant 1901.
-
-| Filter | Why |
-|---|---|
-| `pk.WERKS = '1901'` | Plant 1901 |
-| `mp.PLNTY = 'N'` | Standard routings only (CA02). `Q` = rate routing, edited in CA22, not shown in the CA02 popup. |
-| `pk.LOEKZ`, `mp.LOEKZ` blank | Routing and material assignment not marked for deletion |
-| `DW_SOFT_DELETE_FLAG = 0` | Not deleted in the data lake |
-| `QUALIFY ROW_NUMBER() ... ORDER BY pk.ZAEHL DESC = 1` | PLKO can hold several change states of one routing; keep the latest so a routing is never processed twice |
-
-No PLAS / PLPO / CRHD join: those are per operation / work center and would
-repeat every routing.
-
-Example for 5016441210 (matches the SAP popup below):
-
-| Material | Group | GrC | Description |
+| # | Component description (`txt[13]`) | Routing | Operation |
 |---|---|---|---|
-| 5016441210 | M0164412 | 22 | MF50-07 - 5016441210 |
-| 5016441210 | M0164412 | 27 | MF50-06 - 5016441210 |
-| 5016441210 | M0164412 | 30 | MF30-02 - 5016441210 - L501644G |
-| 5016441210 | M5016441 | 13 | MF50-05 5016441210 NATURAL L501644G |
+| 1 | contains a word of `PACKAGING_WORDS` | any | 0030 |
+| 2 | contains a word of `LUBRICANT_WORDS` | op 0030 WC in `LUBRICANT_0030_WORK_CENTERS` (exact) | 0030 |
+| 3 | anything else | - | 0020 |
 
-Note: the data lake may lag behind SAP. A routing created today may not be in
-the list yet and will not be processed.
+- Case-insensitive "contains": plurals match (`BOXES`, `Sheets`), but so do e.g. `toolbox`.
+- Work center match is exact: `YMHI-2` ... `YMHI-27` do not count.
+- Only rows with an **empty** operation (`txt[10]`) are ticked; assigned rows are never touched.
+- The scan stops at the first blank row. Only **visible** rows are checked (no scrolling):
+  `WARNING: table has more rows than visible` in the console means rows below were not checked.
 
 ---
 
-## Screen 1 - CA02 initial screen
+## 5. SAP screens
 
-Enter material and plant, press Enter (`open_ca02()`, `open_routing()`).
+### Screen 1 - CA02 initial screen
 
 | Field | Element ID |
 |---|---|
 | Material | `wnd[0]/usr/ctxt[0]` |
 | Plant | `wnd[0]/usr/ctxt[1]` |
 
----
-
-## Screen 2 - Popup "Entry Option: Group"
+### Screen 2 - Popup "Entry Option: Group"
 
 ![Entry Option: Group popup](images/ca02_group_popup.png)
 
-Shown when the material has routings in **more than one group**.
-If there is only one group, SAP skips it and opens Screen 3 directly.
+Shown when the material has routings in more than one group.
 
 - Table: `wnd[1]/usr/tblSAPLCPSLTCTRL_2110`
-- **Group** is only filled on the first row of each group. Double-clicking that row
-  opens the group (Screen 3 then shows only that group's GrC).
+- Group is only filled on the first row of each group; double-clicking it opens that group.
 
-| Column | Content | Constant in `routing.py` |
+| Column | Content | Constant |
 |---|---|---|
-| `ctxt[0,row]` | Group (PLNNR) | `POPUP_GROUP_COL = 0` |
-| `txt[1,row]` | GrC (PLNAL) | `POPUP_COUNTER_COL = 1` |
-| `txt[2,row]` | Task list description | `POPUP_DESC_COL = 2` |
+| `ctxt[0,row]` | Group | `POPUP_GROUP_COL` |
+| `txt[1,row]` | GrC | `POPUP_COUNTER_COL` |
+| `txt[2,row]` | Task list description (double-clicked) | `POPUP_DESC_COL` |
 
-Code: `select_group()` finds the row with `Group = routing.group` (`find_row()`)
-and double-clicks it.
-
----
-
-## Screen 3 - Change Routing: Overview (Header overview)
+### Screen 3 - Change Routing: Overview (header overview)
 
 ![Change Routing: Overview](images/ca02_header_overview.png)
 
-Lists the GrC of the selected group.
+Lists the GrC of the selected group. Skipped by SAP when the group has only one routing.
 
 - Table: `wnd[0]/usr/tblSAPLCPDITCTRL_1200`
 
-| Column | Content | Constant in `routing.py` |
+| Column | Content | Constant |
 |---|---|---|
-| `txt[0,row]` | GrC | `HEADER_COUNTER_COL = 0` |
-| `txt[1,row]` | Task list description | `HEADER_DESC_COL = 1` |
+| `txt[0,row]` | GrC | `HEADER_COUNTER_COL` |
+| `txt[1,row]` | Task list description (double-clicked) | `HEADER_DESC_COL` |
 
-Code: `open_header_row()` finds the row with `GrC = routing.counter` (leading
-zeros ignored) and double-clicks it.
+### Screen 4 - Popup "Choose Alternative BOM" (`btn[7]`)
 
----
+Opened with `wnd[0]/tbar[1]/btn[7]`. Lists all BOMs of the material (all usages):
 
-## Screen 4 - BOM selection popup (`btn[7]`)
+| BOM Usg | BOM | AltBOM | Alternative Text |
+|---|---|---|---|
+| 1 | 01820533 | 1 | |
+| 2 | 01955417 | 1 | |
 
-*No screenshot yet.*
+- Element: `wnd[1]/usr/sub/1/txt[<row>, <column position>]`; AltBOM = `txt[row,19]` (`BOM_POPUP_ALT_COL`).
+- The row is found **by value**: the first row whose AltBOM equals the entry's alt BOM is
+  double-clicked. Assumes usage 1 is listed before usage 2 (as in the example).
+- Popup not shown: SAP opened the only BOM directly -> OK if the material has 1 active alt BOM, else FAILED.
 
-Opened with `wnd[0]/tbar[1]/btn[7]`. The new BOM is double-clicked at
-`wnd[1]/usr/sub/1/txt[1,8]` (row 8, `BOM_ROW` in `routing_main.py`).
-
-Code: `open_component_allocation()`
-
----
-
-## Screen 5 - Component allocation
-
-*No screenshot yet.*
+### Screen 5 - Component allocation
 
 - Table: `wnd[0]/usr/tblSAPLCMDITCTRL_1000`
 
-| Column | Content | Constant in `routing.py` |
+| Column | Content | Constant |
 |---|---|---|
-| `txt[10,row]` | Operation already assigned (`0030`, `0040`, ...) | `COMP_OPERATION_COL = 10` |
-| `txt[13,row]` | Material description | `COMP_DESC_COL = 13` |
+| `chk[0,row]` | row selection (focused before `btn[5]`) | |
+| `txt[10,row]` | operation already assigned | `COMP_OPERATION_COL` |
+| `txt[13,row]` | material description | `COMP_DESC_COL` |
 
-### Selecting rows (`select_components()`)
+Assign (`assign_to_operation`): focus `chk[0,<last ticked row>]` -> `wnd[0]/tbar[1]/btn[5]` ->
+type operation in `wnd[1]/usr/txt[0]` -> Enter in the popup. If the popup does not open,
+the entry fails with SAP's status bar text.
 
-- Only the visible rows are checked, no scrolling. A warning is printed if the
-  table has more rows than visible.
-- Stops at the first blank row (columns 0-9 empty).
-- A row is selected only if its operation (`txt[10]`) is empty.
-- Every row is set selected / not selected explicitly, so rows from pass 1
-  are never re-assigned in pass 2.
-
-### Packaging check (`is_packaging()`)
-
-Description lowercased, then checked for any word in `PACKAGING_WORDS`:
-
-```
-carton, sheet, bag, silica, bubble, box
-```
-
-"Contains" match, so case and plurals are covered:
-
-| Description | Packaging? |
-|---|---|
-| CARTON 12x8 | yes |
-| Sheets, foam | yes |
-| Poly Bag | yes |
-| SILICA GEL | yes |
-| Bubble wrap | yes |
-| BOXES | yes |
-| Plug housing | no |
-
-Side effect: words like `toolbox` or `baggage` also match.
-
-### Two passes (`assign_components()`)
-
-| Pass | Selects | Operation |
-|---|---|---|
-| 1 | empty operation AND packaging description | `0030` (`PACKAGING_OPERATION`) |
-| 2 | empty operation (packaging rows now have 0030) | `0020` (`DEFAULT_OPERATION`) |
-
-A pass with nothing selected is skipped.
-
-### Assign (`assign_to_operation()`)
-
-1. Focus `chk[0,<last selected row>]`
-2. Press `wnd[0]/tbar[1]/btn[5]`
-3. Type the operation into `wnd[1]/usr/txt[0]`
-4. Enter in the popup (`wnd[1]`)
-
-If the popup does not open after `btn[5]`, the routing fails with SAP's status
-bar text. The console also prints the status and open windows after `btn[5]`.
-
-### Save
-
-`wnd[0]/tbar[0]/btn[11]` once per routing, only if something was assigned.
+Save: `wnd[0]/tbar[0]/btn[11]`.
 
 ---
 
-## Result per routing
+## 6. Settings
 
-| STATUS | When | MESSAGE |
+| Setting | File | Value |
 |---|---|---|
-| SUCCESS | Something assigned and saved | e.g. `0030: 2 rows, 0020: 5 rows. <SAP status>` |
-| SKIPPED | No unassigned components | `No unassigned components` |
-| FAILED | Group / GrC not found, popup did not open, any SAP error | Error text |
-
-Materials with no routing in Snowflake are added as `FAILED` -
-`No routing found in MLX_DATALAKE`.
-
----
-
-## Settings
-
-| Setting | File | Default |
-|---|---|---|
-| `INPUT_FILE` | `routing_main.py` | `create_bom_final.xlsx` |
-| `BOM_ROW` | `routing_main.py` | `8` |
-| `DEFAULT_OPERATION` / `PACKAGING_OPERATION` | `routing.py` | `0020` / `0030` |
+| `TASKS` (input files, material column) | `routing_main.py` | see 2.1 / 2.2 |
+| `SAVE_EVERY` | `routing_main.py` | 5 |
 | `PACKAGING_WORDS` | `routing.py` | carton, sheet, bag, silica, bubble, box |
-| `STEP_DELAY` | `routing.py` | `2` (seconds per SAP action, temporary for observing; `0` = normal speed) |
+| `LUBRICANT_WORDS` | `routing.py` | lubricant |
+| `LUBRICANT_0030_WORK_CENTERS` | `routing.py` | YMHI, YMHI-1 |
+| `DEFAULT_OPERATION` / `PACKAGING_OPERATION` | `routing.py` | 0020 / 0030 |
+| `is_trial()` | `routing.py` | text contains TRIAL |
+| `BATCH_SIZE` | `routing_sf.py` | 500 materials per query |
+| `STEP_DELAY` | `connect.py` | seconds per SAP action in `slow` mode |
+
+Rules that may change later are kept in one function or constant each (`is_trial`,
+`is_packaging`, `is_lubricant`, `planned_operation`, `skip_reason`), so a rule change is
+a one-line edit.
 
 ---
 
-## Open points
+## 7. Known limits / open points
 
-- BOM row in Screen 4 is fixed at 8.
 - Component table: only visible rows are handled (no scrolling).
+- BOM popup: first row with the wanted AltBOM is used, no BOM usage check (by decision).
+- "Already assigned" skip relies on Snowflake; very recent changes in SAP may be missing.
 - Blank-row check in Screen 5 (columns 0-9 empty) is not verified.
+- `production_version.py` takes its routing list from `Routing Result` (deleted / trial skipped); a standalone production-version task would need the Snowflake path (see `workflow.md` 4).
 - Screenshots for Screens 1, 4 and 5 still to add (`docs/images/`).

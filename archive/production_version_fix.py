@@ -18,7 +18,7 @@ from production_version import (
     open_mm02, open_production_versions, process_production_version,
     save_material, version_text, is_trial)
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_final_prod_version_fix.xlsx"       # ..._prod_version.xlsx, updated in place
+INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_result.xlsx"       # ..._prod_version.xlsx, updated in place
 TEXT_COL = VERSION_COL + 1      # description is the column after the version
 DONE = ("SUCCESS",)         # FIX STATUS values that are not processed again (blank / FAILED / SKIPPED are)
 

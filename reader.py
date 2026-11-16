@@ -1,15 +1,15 @@
 import pandas as pd
 from bom import clean_component, clean_number, clean_text
 from models import BomHeader, BomItem
+from workbook import PARENT_COL, ALT_BOM_COL     # shared column names
 
 # Excel column names (after unmerge)
-PARENT_COL = "Parent Material"
-ALT_BOM_COL = "Alternative BOM"
 COMPONENT_COL = "Component after"
 QUANTITY_COL = "BOM rate after"
 UNIT_COL = "Unit after"
 SCRAP_COL = "Component Scrap after"
 BASE_QTY_COL = "Base Qty after"
+BASE_QTY_FALLBACK_COL = "Base Qty"
 ACTION_COL = "Action"           # optional: CREATE / CHANGE
 
 VALID_ACTIONS = ("CREATE", "CHANGE")
@@ -28,7 +28,9 @@ def decide_action(alt_bom, action_value):
 def read_boms(file_path):
     df = pd.read_excel(file_path, dtype=str)
 
-    required = [PARENT_COL, ALT_BOM_COL, COMPONENT_COL, QUANTITY_COL, UNIT_COL, SCRAP_COL, BASE_QTY_COL]
+    # Base quantity column: "Base Qty after" or just "Base Qty"
+    base_qty_col = BASE_QTY_COL if BASE_QTY_COL in df.columns else BASE_QTY_FALLBACK_COL
+    required = [PARENT_COL, ALT_BOM_COL, COMPONENT_COL, QUANTITY_COL, UNIT_COL, SCRAP_COL, base_qty_col]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing Excel columns: {missing}")
@@ -51,7 +53,7 @@ def read_boms(file_path):
             boms[key] = BomHeader(
                 parent=parent,
                 alt_bom=alt_bom,
-                base_qty=clean_number(row[BASE_QTY_COL]),
+                base_qty=clean_number(row[base_qty_col]),
                 action=decide_action(alt_bom, row[ACTION_COL] if has_action else None),
             )
 
@@ -87,11 +89,3 @@ def validate_boms(boms):
             seen.add(item.component)
     return problems
 
-
-def print_boms(boms):
-    for i, bom in enumerate(boms, 1):
-        print(f"[{i}] {bom.action:<6} parent={bom.parent} alt={bom.alt_bom} "
-            f"base={bom.base_qty:g} rows={bom.excel_rows[0]}-{bom.excel_rows[-1]}")
-        for item in bom.items:
-            print(f"      row {item.excel_row:<4} {item.item_category}  {item.component:<10} "
-                f"qty {item.quantity:>9g}  {item.unit:<3} scrap {item.scrap:g}")

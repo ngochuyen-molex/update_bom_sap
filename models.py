@@ -37,12 +37,21 @@ class Routing:
     description: str = ""       # KTEXT
     plant: str = "1901"
     group_size: int = 1         # number of GrC of this material + group (from Snowflake)
-    status: str = ""            # SUCCESS / SKIPPED / FAILED
+    deleted: bool = False       # routing header deletion indicator (PLKO.DELKZ = X)
+    # Component assignment per routing x alt BOM (empty alt_bom = not used, e.g. production version)
+    alt_bom: str = ""           # alt BOM without leading zeros, e.g. "2"
+    alt_bom_text: str = ""      # STKO.STKTX of the latest change state
+    bom_count: int = 1          # active alt BOMs of the material (BOM popup check)
+    op_0030_wc: str = ""        # work center of operation 0030 (lubricant rule)
+    unassigned: int = -1        # unassigned components (Snowflake); -1 = unknown
+    total_items: int = -1       # BOM items of this alt BOM (Snowflake); -1 = unknown
+    status: str = ""            # SUCCESS / SKIPPED / FAILED / PENDING
     message: str = ""
 
     @property
     def key(self):
-        return f"{self.material} {self.group}/{self.counter}"
+        alt = f" alt {self.alt_bom}" if self.alt_bom else ""
+        return f"{self.material} {self.group}/{self.counter}{alt}"
 
 
 @dataclass

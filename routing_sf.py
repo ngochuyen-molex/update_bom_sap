@@ -1,5 +1,6 @@
 import pandas as pd
 import snowflake.connector
+from bom import clean_component
 from models import Routing
 
 BATCH_SIZE = 500            # materials per query (long IN lists are split)
@@ -140,12 +141,9 @@ SQL_ALLOCATION = """
 """
 
 
-def clean_material(value):
-    # 5052760489 / "005052760489" / 5052760489.0 -> "5052760489"
-    text = str(value).strip()
-    if text.endswith(".0"):
-        text = text[:-2]
-    return text.lstrip("0")
+# One material cleaner for all phases (bom.clean_component):
+# 5052760489 / "005052760489" / 5052760489.0 / "5052760489.000" -> "5052760489"
+clean_material = clean_component
 
 
 def run_query(conn, sql, materials, repeat=1):
@@ -188,6 +186,42 @@ def load_routings(materials, plant="1901"):
             deleted=row.ROUTING_DELETED == "X")
         for row, size in zip(df.itertuples(index=False), sizes)
     ]
+
+
+def load_routing_list(materials, plant="1901"):
+    """Routings + op 0030 work center only (no alt BOMs, no allocation).
+
+    Used by the create-BOM chain: the new alt BOM comes from the phase 1 result columns,
+    because a BOM created a few minutes ago is not in MLX_DATALAKE yet (~20 min lag).
+    Routings already existed before, so the lag does not matter for them.
+    Returns {material: [Routing, ...]} with group_size, deleted, op_0030_wc filled in.
+    """
+    materials = sorted({clean_material(m) for m in materials if clean_material(m)})
+    if not materials:
+        return {}
+
+    conn = snowflake.connector.connect(connection_name="default")
+    try:
+        print("Snowflake: routings");        routings = run_query(conn, SQL_ROUTINGS, materials)
+        print("Snowflake: op 0030 WC");      wcs = run_query(conn, SQL_OP_0030_WC, materials)
+    finally:
+        conn.close()
+    if routings.empty:
+        return {}
+
+    group_sizes = routings.groupby(["MATERIAL", "ROUTING_GROUP"]).size().to_dict()
+    wc_by_routing = {(r.MATERIAL, r.ROUTING_GROUP, r.GROUP_COUNTER): r.WORK_CENTER
+                     for r in wcs.itertuples(index=False)}
+    result = {}
+    for r in routings.itertuples(index=False):
+        counter = r.GROUP_COUNTER or "0"
+        result.setdefault(r.MATERIAL, []).append(Routing(
+            material=r.MATERIAL, group=r.ROUTING_GROUP, counter=counter,
+            description=(r.ROUTING_DESCRIPTION or "").strip(), plant=plant,
+            group_size=int(group_sizes.get((r.MATERIAL, r.ROUTING_GROUP), 1)),
+            deleted=r.ROUTING_DELETED == "X",
+            op_0030_wc=wc_by_routing.get((r.MATERIAL, r.ROUTING_GROUP, counter), "")))
+    return result
 
 
 def load_assignment_worklist(materials, plant="1901"):
