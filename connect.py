@@ -2,13 +2,12 @@ import subprocess
 import sys
 import time
 import win32com.client
+from config import SAP_CONNECTION_NAME
 
 SAP_LOGON_PATH = (
     r"C:\Program Files (x86)\SAP\FrontEnd"
     r"\SapGui\saplogon.exe"
 )
-
-SAP_CONNECTION_NAME = "M04 [SSO]"
 
 # Slow mode: seconds to wait after every SAP action (press, Enter, typing, selecting)
 STEP_DELAY = 0.5

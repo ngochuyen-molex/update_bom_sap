@@ -14,9 +14,10 @@ import sys
 from datetime import date
 import re
 from connect import get_session, slow_from_args, SAPConnectionError
-from bom import clean_component, set_text, press_enter
+from bom import set_text, press_enter
 from models import ProductionVersion
 from routing import get_cell_text, get_status_text, is_trial
+from utils import clean_component
 from workbook import (CHAIN_FILE, ROUTING_SHEET, PROD_VERSION_SHEET, CONTINUE_STATUSES,
                       has_sheet, read_sheet, save_sheet, now, cell)
 

@@ -1,5 +1,7 @@
-import math
-import pandas as pd
+from config import BOM_USAGE, PLANT
+# Cleaning helpers live in utils.py; imported here so `from bom import *` keeps working
+from utils import clean_component, clean_item, clean_number, clean_text, numbers_equal
+
 # SAP Bom item table
 BOM_TABLE_ID = (
     "wnd[0]/usr/tabsTS_ITOV/tabpTCMA/"
@@ -8,63 +10,6 @@ BOM_TABLE_ID = (
 # ============================================================
 # BASIC HELPERS / UTILITY
 # ============================================================
-
-def clean_text(value):
-    if pd.isna(value):
-        return ""
-    return str(value).strip()
-
-def clean_component(value):
-    value = clean_text(value)
-    try:
-        # handles (.0, .000)
-        return str(int(float(value))).lstrip("0")
-    except ValueError:
-        return value.lstrip("0")
-
-def clean_item(value):
-    value = clean_text(value)
-
-    if value.endswith(".0"):
-        value = value[:-2]
-
-    if value.isdigit():
-        if len(value) == 1 and value != "0":
-            value = str(int(value) * 10)
-        if len(value) < 4:
-            value = value.zfill(4)
-
-    return value
-
-def clean_number(value):
-    if pd.isna(value):
-        return None
-
-    value = str(value).strip()
-
-    if value == "":
-        return None
-
-    # SAP negative format
-    # 160- -> -160
-    if value.endswith("-"):
-        value = "-" + value[:-1]
-
-    # remove thousand separators
-    value = value.replace(",", "")
-
-    return float(value)
-
-def numbers_equal(a, b, decimal_places=2):
-    a = clean_number(a)
-    b = clean_number(b)
-    if a is None and b is None:
-        return True
-
-    if a is None or b is None:
-        return False
-
-    return round(a, decimal_places) == round(b, decimal_places)
 
 def set_text(session, element_id, value):
     session.findById(element_id).text = str(value)
@@ -82,8 +27,8 @@ def open_bom(
     session,
     material,
     alt_bom,
-    bom_usage="1",
-    plant="1901",
+    bom_usage=BOM_USAGE,
+    plant=PLANT,
     component=None,
     item=None,
 ):

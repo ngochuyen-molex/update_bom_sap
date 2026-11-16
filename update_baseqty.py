@@ -1,8 +1,8 @@
 import os
 from connect import get_session, SAPConnectionError
-from excel_utils import load_excel
+from workbook import load_excel
 from bom import *
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\create_bom_final.xlsx"
+from config import BASE_QTY_FILE as INPUT_FILE
 
 def main():
     try:

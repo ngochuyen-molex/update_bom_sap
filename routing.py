@@ -1,4 +1,6 @@
-from bom import clean_component, set_text, press_enter
+from bom import set_text, press_enter
+from config import PLANT
+from utils import clean_component
 from models import Routing
 
 # Popup after Enter: "Entry Option: Group" - all groups and GrC of the material
@@ -128,7 +130,7 @@ def open_ca02(session):
     session.findById("wnd[0]/tbar[0]/okcd").text = "/NCA02"
     press_enter(session)
 
-def open_routing(session, material, plant="1901"):
+def open_routing(session, material, plant=PLANT):
     print(f"Material={clean_component(material)}, Plant={plant}")
     set_text(session, "wnd[0]/usr/ctxt[0]", clean_component(material))
     set_text(session, "wnd[0]/usr/ctxt[1]", plant)

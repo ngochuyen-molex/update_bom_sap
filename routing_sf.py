@@ -1,7 +1,8 @@
 import pandas as pd
 import snowflake.connector
-from bom import clean_component
+from config import PLANT, SNOWFLAKE_CONNECTION
 from models import Routing
+from utils import clean_component
 
 BATCH_SIZE = 500            # materials per query (long IN lists are split)
 
@@ -158,13 +159,13 @@ def run_query(conn, sql, materials, repeat=1):
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def load_routings(materials, plant="1901"):
+def load_routings(materials, plant=PLANT):
     # Returns a flat list of Routing, one per material + group + GrC
     materials = sorted({clean_material(m) for m in materials if clean_material(m)})
     if not materials:
         return []
 
-    conn = snowflake.connector.connect(connection_name="default")
+    conn = snowflake.connector.connect(connection_name=SNOWFLAKE_CONNECTION)
     try:
         df = run_query(conn, SQL_ROUTINGS, materials)
     finally:
@@ -188,7 +189,7 @@ def load_routings(materials, plant="1901"):
     ]
 
 
-def load_routing_list(materials, plant="1901"):
+def load_routing_list(materials, plant=PLANT):
     """Routings + op 0030 work center only (no alt BOMs, no allocation).
 
     Used by the create-BOM chain: the new alt BOM comes from the phase 1 result columns,
@@ -200,7 +201,7 @@ def load_routing_list(materials, plant="1901"):
     if not materials:
         return {}
 
-    conn = snowflake.connector.connect(connection_name="default")
+    conn = snowflake.connector.connect(connection_name=SNOWFLAKE_CONNECTION)
     try:
         print("Snowflake: routings");        routings = run_query(conn, SQL_ROUTINGS, materials)
         print("Snowflake: op 0030 WC");      wcs = run_query(conn, SQL_OP_0030_WC, materials)
@@ -224,7 +225,7 @@ def load_routing_list(materials, plant="1901"):
     return result
 
 
-def load_assignment_worklist(materials, plant="1901"):
+def load_assignment_worklist(materials, plant=PLANT):
     """Component assignment work list: one Routing per routing x active alt BOM.
 
     Returns (entries, items):
@@ -238,7 +239,7 @@ def load_assignment_worklist(materials, plant="1901"):
     if not materials:
         return [], pd.DataFrame()
 
-    conn = snowflake.connector.connect(connection_name="default")
+    conn = snowflake.connector.connect(connection_name=SNOWFLAKE_CONNECTION)
     try:
         print("Snowflake: routings");        routings = run_query(conn, SQL_ROUTINGS, materials)
         print("Snowflake: alt BOMs");        alt_boms = run_query(conn, SQL_ALT_BOMS, materials)

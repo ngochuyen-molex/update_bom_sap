@@ -1,5 +1,5 @@
 import pandas as pd
-from bom import clean_component, clean_number, clean_text
+from utils import clean_component, clean_number, clean_text
 from models import BomHeader, BomItem
 from workbook import PARENT_COL, ALT_BOM_COL     # shared column names
 

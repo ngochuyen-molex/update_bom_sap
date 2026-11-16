@@ -1,9 +1,9 @@
 import os
 import pandas as pd
 from connect import SAPConnectionError, get_session
-from excel_utils import load_excel
+from workbook import load_excel
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\Set MU APS.xlsx"
+from config import WORKCENTER_FILE as INPUT_FILE
 REQUIRED_COLUMNS = ("Work_Center", "ME", "MU")
 
 

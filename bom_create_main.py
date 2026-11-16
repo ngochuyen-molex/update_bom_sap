@@ -17,9 +17,10 @@ A run always continues: BOMs whose rows are SUCCESS are never created again
 import sys
 import time
 from connect import get_session, slow_from_args, SAPConnectionError
-from bom import save_bom, clean_component, clean_text, press_enter
+from bom import save_bom, press_enter
 from bom_create import open_cs01, open_bom_cs01, enter_items, get_created_alt_bom
 from reader import read_boms, validate_boms
+from utils import clean_component, clean_text
 from workbook import (CHAIN_FILE, PARENT_COL, ALT_BOM_COL, CREATED_ALT_BOM_COL,
                       STATUS_COL, MESSAGE_COL, UPDATED_AT_COL,
                       update_source_columns, read_sheet, now, cell)

@@ -35,7 +35,7 @@ Importance: **High** = the chain breaks without it · **Medium** = needed for a 
 | `routing_sf.py` | Snowflake queries | phase 2 (`load_routing_list`, `load_assignment_worklist`). `load_routings` is unused today, kept for a future standalone PV task | **High** |
 | `production_version.py` | **phase 3 runner** (MM02) | you | **High** |
 | `docs/workflow.md`, `docs/routing.md` | how the chain / routing works | you | **High** |
-| `docs/TODO.md` | known bugs, open decisions, plans | you | **High** |
+| `docs/TODO_bug.md` | known bugs, open decisions, plans | you | **High** |
 | `docs/images/*.png` | CA02 screenshots used in `routing.md` | docs | Low |
 
 ### Standalone tools (not part of the chain, still work)
@@ -47,7 +47,7 @@ Importance: **High** = the chain breaks without it · **Medium** = needed for a 
 | `main.py` | CS02 change BOM | saves its input file with **one sheet** only -> never point it at `CREATE_BOM.xlsx` | Medium |
 | `update_baseqty.py` | change base quantity in CS02 | affected by bug A4 (Enter not pressed) | Medium |
 | `update_workcenter_efficiency.py` | work center efficiency (Set MU APS.xlsx) | own save logic | Low |
-| `TODO.md` (root), `note.md` | CS02 search ideas (TODO-1), notes on `bom.py` scrolling | still valid for `bom.py` | Low |
+| `docs/TODO.md`, `docs/note.md` | CS02 search ideas (TODO-1), notes on `bom.py` scrolling | still valid for `bom.py` | Low |
 | `ca02.vbs`, `mm02.vbs`, `altbompopup.vbs` | SAP GUI recordings the Python steps were built from | reference for screen IDs | Low |
 
 ### Archived (this folder)

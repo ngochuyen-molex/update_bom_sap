@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from config import BOM_USAGE, PLANT
 
 
 @dataclass
@@ -16,8 +17,8 @@ class BomHeader:
     parent: str
     alt_bom: str
     base_qty: float
-    plant: str = "1901"
-    usage: str = "1"
+    plant: str = PLANT
+    usage: str = BOM_USAGE
     action: str = "CREATE"      # CREATE (CS01) or CHANGE (CS02)
     items: list[BomItem] = field(default_factory=list)
     created_alt_bom: str = ""   # alt BOM number SAP assigned in CS01
@@ -35,7 +36,7 @@ class Routing:
     group: str                  # PLNNR, e.g. "M0164412"
     counter: str                # GrC / PLNAL without leading zeros, e.g. "22"
     description: str = ""       # KTEXT
-    plant: str = "1901"
+    plant: str = PLANT
     group_size: int = 1         # number of GrC of this material + group (from Snowflake)
     deleted: bool = False       # routing header deletion indicator (PLKO.DELKZ = X)
     # Component assignment per routing x alt BOM (empty alt_bom = not used, e.g. production version)
@@ -61,7 +62,7 @@ class ProductionVersion:
     counter: str                # group counter (PLNAL)
     description: str            # routing description
     alt_bom: str
-    bom_usage: str = "1"
+    bom_usage: str = BOM_USAGE
     text: str = ""              # production version text = description + " B" + alt BOM
     version: str = ""           # new version SAP gets, e.g. "0010"
     status: str = ""            # SUCCESS / FAILED

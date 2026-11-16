@@ -24,6 +24,7 @@ Phase 2 never writes into the first sheet.
 """
 import sys
 import pandas as pd
+import config
 from connect import get_session, slow_from_args, SAPConnectionError
 from models import Routing
 from routing import process_routing, skip_reason, planned_operation
@@ -35,10 +36,10 @@ from workbook import (CHAIN_FILE, ROUTING_SHEET, CONTINUE_STATUSES,
 TASKS = {
     # task: (input file, result sheet, preview sheet or None)
     "newbom": (CHAIN_FILE, ROUTING_SHEET, None),
-    "altbom": (r"C:\Users\nguyeb3\Downloads\md_assign_component.xlsx", "Result", "Preview"),
+    "altbom": (config.ALTBOM_FILE, "Result", "Preview"),
 }
 ALTBOM_MATERIAL_COLUMN = "Material"         # first sheet of the altbom file
-SAVE_EVERY = 5                              # save the result sheet after every N processed entries
+SAVE_EVERY = config.SAVE_EVERY              # save the result sheet after every N processed entries
 
 RESULT_COLUMNS = ["Material", "Group", "GrC", "Description", "Alt BOM", "Alt BOM Text",
                   "Op 0030 WC", "Unassigned (Snowflake)", "STATUS", "MESSAGE", "Updated At"]

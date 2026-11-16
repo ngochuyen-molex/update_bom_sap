@@ -1,10 +1,10 @@
 import os
 import time
 from connect import get_session, SAPConnectionError
-from excel_utils import load_excel
+from workbook import load_excel
 from bom import *
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM_list.xlsx"
+from config import CHANGE_BOM_FILE as INPUT_FILE
 
 
 def add_log(df, idx, message):

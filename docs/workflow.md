@@ -216,4 +216,4 @@ the file, so a crash can't leave the workbook half-written.
 | `bom.py` | shared cleaning (`clean_component` = the one material / alt BOM cleaner), `press_enter`, `save_bom`, CS02 helpers |
 
 Full inventory (incl. standalone tools and importance): [`archive/README.md`](../archive/README.md).
-Known bugs, open decisions and plans: [`TODO.md`](TODO.md).
+Known bugs, open decisions and plans: [`TODO_bug.md`](TODO_bug.md). CS02 search ideas: [`TODO.md`](TODO.md), [`note.md`](note.md).

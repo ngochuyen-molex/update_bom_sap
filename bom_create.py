@@ -1,5 +1,7 @@
-from bom import BOM_TABLE_ID, clean_component, clean_number, clean_text, set_text, press_enter
+from bom import BOM_TABLE_ID, set_text, press_enter
+from config import BOM_USAGE, PLANT
 from models import BomItem
+from utils import clean_component, clean_number, clean_text
 
 # Item table columns (row index = visible row, starts at 0)
 ICT_COL = "ctxt[1,{row}]"        # item category, e.g. "L"
@@ -26,8 +28,8 @@ def open_cs01(session):
 def open_bom_cs01(
     session,
     material,
-    bom_usage="1",
-    plant="1901",
+    bom_usage=BOM_USAGE,
+    plant=PLANT,
 ):
     # CS01 assigns the alternative BOM itself, so alt_bom is not typed here
     print(f"Material={clean_component(material)}, "

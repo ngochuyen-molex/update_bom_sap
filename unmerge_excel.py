@@ -1,6 +1,6 @@
-from excel_utils import unmerge_and_fill
+from workbook import unmerge_and_fill
 
-INPUT_FILE = r"C:\Users\nguyeb3\Downloads\CHANGE_BOM_demo.xlsx"
+from config import UNMERGE_FILE as INPUT_FILE
 
 
 def main():
