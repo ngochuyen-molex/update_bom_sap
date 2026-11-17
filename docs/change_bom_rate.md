@@ -1,6 +1,6 @@
 # Logic Notes
 
-## 0. Main algorithm (`main.py`)
+## 0. Main algorithm (`bom_update_main.py`)
 
 ```text
 Connect to SAP (connect.py: get_session)
@@ -70,7 +70,7 @@ Notes:
 
 ## 1. Finding the BOM row: by Item or by Component
 
-In `main.py`, each Excel row is matched to a SAP BOM line:
+In `bom_update_main.py`, each Excel row is matched to a SAP BOM line:
 
 - If `Item` has a value, it searches by item number (`find_item_row()` in `bom.py`).
 - If `Item` is empty or NaN, it searches by `Component before` (`find_component_row()` in `bom.py`).
@@ -134,7 +134,7 @@ Suppose the component is at absolute row 10:
 2. The scan continues to page 3 (to check for duplicates), so row 10 is no longer on screen.
 3. `scroll_bom_table(session, 8)` scrolls back and returns the position SAP actually landed on (8).
 4. Visible row = 10 - 8 = **2**, the third row on screen.
-5. That visible row is returned to `main.py` and used for validation and the update.
+5. That visible row is returned to `bom_update_main.py` and used for validation and the update.
 
 ```python
 visible_row = absolute_row - scroll_bom_table(session, page_start)

@@ -8,15 +8,15 @@ their own result sheet.
 > results into it during the run; an open file is locked by Windows and the save fails.
 
 ```
-CREATE_BOM.xlsx  (workbook.CHAIN_FILE)
-├─ Sheet1               source (you) + phase 1 result columns   python create_main.py
+CREATE_BOM.xlsx  (config.CHAIN_FILE, re-exported by workbook.py)
+├─ Sheet1               source (you) + phase 1 result columns   python bom_create_main.py
 ├─ Routing Result       phase 2                                 python routing_main.py
 └─ Prod Version Result  phase 3                                 python production_version.py
 ```
 
 | Phase | Script | Reads | SAP | Snowflake | Writes | One row per |
 |---|---|---|---|---|---|---|
-| 1 Create BOM | `create_main.py` | `Sheet1` | CS01 | no | result columns in `Sheet1` | component (source row) |
+| 1 Create BOM | `bom_create_main.py` | `Sheet1` | CS01 | no | result columns in `Sheet1` | component (source row) |
 | 2 Assign components | `routing_main.py` | `Sheet1` (STATUS SUCCESS) | CA02 | routings + op 0030 WC | `Routing Result` | routing x new alt BOM |
 | 3 Production version | `production_version.py` | `Routing Result` | MM02 | no | `Prod Version Result` | routing x new alt BOM |
 
@@ -82,12 +82,32 @@ Same options in every phase:
 | `continue` (`retry`) | - (a normal run always continues) | process `PENDING` / `FAILED` of `Routing Result`, **no Snowflake** | process `PENDING` / `FAILED` of `Prod Version Result` |
 | `fresh` | - | rebuild `Routing Result` (keeps SUCCESS rows) | rebuild from `Routing Result` (keeps SUCCESS rows) |
 | `slow` | wait after every SAP action | same | same |
+| `test` | - | - | one hard-coded version, no Excel |
+
+### All phases at once (`run_all.py`)
 
 ```powershell
 cd C:\Users\nguyeb3\Downloads\SAP_automation\change_bom
 
-python create_main.py check            # 1. validate the source
-python create_main.py                  #    create BOMs (rerun = continue)
+python run_all.py check         # all phases without SAP: build + validate the work lists
+python run_all.py               # phases 1, 2, 3 in SAP, one after the other
+python run_all.py from=2        # start at phase 2 (or from=3), e.g. after fixing a problem
+python run_all.py slow          # wait after every SAP action, passed on to every phase
+```
+
+Each phase is started as the normal script would be: phase 1 plain, phases 2 and 3 with
+`fresh` (rebuild, SUCCESS rows kept). After each phase the result sheet is counted; the
+chain stops when a phase ends with an error, when its result sheet is missing, or when it
+has no SUCCESS rows for the next phase. `FAILED` rows do **not** stop the chain - the next
+phase skips them, so fix them and run again.
+
+### One phase at a time
+
+```powershell
+cd C:\Users\nguyeb3\Downloads\SAP_automation\change_bom
+
+python bom_create_main.py check        # 1. validate the source
+python bom_create_main.py              #    create BOMs (rerun = continue)
 
 python routing_main.py check           # 2. routing list -> Routing Result
 python routing_main.py                 #    assign (or: continue)
@@ -104,7 +124,7 @@ phase 3 are kept, nothing is created twice).
 
 ---
 
-## 2. Phase 1 - create BOM (`create_main.py`)
+## 2. Phase 1 - create BOM (`bom_create_main.py`)
 
 **Input `Sheet1`** (merged cells: run `unmerge_excel.py` first), read by `reader.py`:
 
@@ -207,13 +227,20 @@ the file, so a crash can't leave the workbook half-written.
 
 | File | Role |
 |---|---|
-| `workbook.py` | `CHAIN_FILE`, sheet names, shared column names, sheet order, safe write of result sheets |
-| `create_main.py`, `reader.py`, `bom_create.py` | phase 1 |
+| `config.py` | **all input file paths and fixed SAP values** (connection, plant, BOM usage, Snowflake connection, `SAVE_EVERY`) - change them here only |
+| `workbook.py` | sheet names, shared column names, sheet order, safe write of result sheets; re-exports `CHAIN_FILE` from `config.py` |
+| `run_all.py` | runs phases 1, 2, 3 one after the other on `CHAIN_FILE` |
+| `bom_create_main.py`, `reader.py`, `bom_create.py` | phase 1 |
 | `routing_main.py`, `routing.py`, `routing_sf.py` | phase 2 (+ task altbom) |
 | `production_version.py` | phase 3 |
-| `models.py` | `BomHeader`, `Routing`, `ProductionVersion` |
+| `models.py` | `BomHeader`, `BomItem`, `Routing`, `ProductionVersion` |
 | `connect.py` | SAP session, `slow` mode |
-| `bom.py` | shared cleaning (`clean_component` = the one material / alt BOM cleaner), `press_enter`, `save_bom`, CS02 helpers |
+| `utils.py` | the cleaners (`clean_component` = the one material / alt BOM cleaner, `clean_item`, `clean_number`, `clean_text`, `numbers_equal`) |
+| `bom.py` | `press_enter`, `save_bom`, CS02 helpers; re-exports the cleaners from `utils.py` |
 
 Full inventory (incl. standalone tools and importance): [`archive/README.md`](../archive/README.md).
-Known bugs, open decisions and plans: [`TODO_bug.md`](TODO_bug.md). CS02 search ideas: [`TODO.md`](TODO.md), [`note.md`](note.md).
+Start here if you are new: [`../README.md`](../README.md).
+Known bugs, open decisions and plans: [`TODO_bug.md`](TODO_bug.md). CS02 search ideas: [`TODO.md`](TODO.md).
+
+> `note.md`, cited by `TODO.md` and by comments in `bom.py` / `bom_update_main.py` as the
+> background for the CS02 table scrolling, is **not in the repo** (checked 2026-11-17).

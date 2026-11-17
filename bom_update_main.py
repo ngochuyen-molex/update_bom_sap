@@ -94,7 +94,7 @@ def main():
                 add_log(df, idx, "About to find matching item")
 
                 # Item filled -> find by item; Item blank -> find by
-                # Component before. See note.md, section 1.
+                # Component before. See docs/change_bom_rate.md, section 1.
                 target_item = row.get("Item")
                 if clean_item(target_item):
                     match_method = "item number"

@@ -49,7 +49,7 @@ def get_bom_item_table(session):
 def scroll_bom_table(session, position):
     # SAP re-renders the table after scrolling, so old table/scrollbar
     # references become invalid. Always re-fetch them.
-    # See note.md, section 2.
+    # See docs/change_bom_rate.md, section 2.
     get_bom_item_table(session).VerticalScrollbar.Position = position
     return int(get_bom_item_table(session).VerticalScrollbar.Position)
 
@@ -82,7 +82,7 @@ def get_component_status_bar_text(session):
 # ============================================================
 
 def find_item_row(session, target_item):
-    # Returns a visible row index. See note.md, sections 2-3.
+    # Returns a visible row index. See docs/change_bom_rate.md, sections 1-2.
     # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
 
@@ -119,7 +119,7 @@ def find_item_row(session, target_item):
 
 def find_component_row(session, target_component):
     # Used when Excel Item is blank. Fails on duplicates on purpose.
-    # See note.md, sections 1-3.
+    # See docs/change_bom_rate.md, sections 1-2.
     # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
     target_component = clean_component(target_component)
@@ -165,7 +165,7 @@ def find_component_row(session, target_component):
         )
 
     # Scroll back to the matched page and convert absolute row -> visible row.
-    # See note.md, section 3.
+    # See docs/change_bom_rate.md, section 2 ("Example" / safety checks).
     absolute_row, page_start = matching_rows[0]
     visible_row = absolute_row - scroll_bom_table(session, page_start)
     if not 0 <= visible_row < visible_rows:

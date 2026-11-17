@@ -79,7 +79,7 @@ def read_new_boms(path):
     # [(material, created alt BOM)] of the BOMs created in phase 1 (result columns in Sheet1)
     df = read_sheet(path, 0)
     if STATUS_COL not in df.columns or CREATED_ALT_BOM_COL not in df.columns:
-        raise ValueError(f"No phase 1 result columns in the first sheet of {path}: run create_main.py first")
+        raise ValueError(f"No phase 1 result columns in the first sheet of {path}: run bom_create_main.py first")
     new_boms = []
     for _, row in df.iterrows():
         if cell(row, STATUS_COL) != "SUCCESS":

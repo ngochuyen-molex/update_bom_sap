@@ -1,7 +1,7 @@
 """Phase 1 - create BOMs in CS01 from the source sheet.
 
 Usage:
-    python create_main.py [check] [slow]
+    python bom_create_main.py [check] [slow]
 
     (no option)  read Sheet1, create every BOM that is not SUCCESS yet
     check        read + validate Sheet1, write the result columns (PENDING / SKIPPED / FAILED), no SAP
@@ -57,7 +57,7 @@ def build_worklist(path):
         if bad:
             bom.status, bom.message = "FAILED", "; ".join(bad)
         elif bom.action != "CREATE":
-            bom.status, bom.message = "SKIPPED", f"Action {bom.action}: not done by create_main.py"
+            bom.status, bom.message = "SKIPPED", f"Action {bom.action}: not done by bom_create_main.py"
         else:
             bom.status, bom.message = "PENDING", ""
         stamps.append(None)

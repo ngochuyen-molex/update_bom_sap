@@ -11,7 +11,7 @@ Status: `OPEN` = to do · `DECIDE` = waiting for your decision · `DONE`.
 
 ### A1 - Phase 1 keeps creating BOMs when the Excel save fails  `DONE` 2026-11-16
 - **Done:** all 3 phases now show a prompt when the file is open: `[s]` save your edits + close it in Excel and continue, `[r]` I closed it, retry, `[q]` stop. On `[q]` the SAP loop **stops at once** and prints which row is in SAP but not in Excel (set it by hand before the next run). Code: `workbook.close_in_excel`, `ask_when_locked`, `save_sheets`; used by `save_sheet` / `update_source_columns`. Tested with real Excel on a temp copy: `[s]` kept the unsaved edit, closed the file and saved the results; `[q]` stopped.
-- **Was:** `create_main.py` ignored the result of `save(...)` in the loop.
+- **Was:** `bom_create_main.py` ignored the result of `save(...)` in the loop.
 - **What happens:** if `CREATE_BOM.xlsx` is open in Excel, the save fails with "Could not save ... Close it in Excel." but the loop goes on creating BOMs in SAP. Their SUCCESS is never written, so the **next run creates the same BOMs again (duplicates in SAP)**.
 - **Fix:** stop the loop as soon as a save fails, or use the retry prompt from section B (recommended).
 - **Option asked about (2026-11-16): close Excel for you, saving your work first.** When the save fails:
@@ -46,12 +46,12 @@ Status: `OPEN` = to do · `DECIDE` = waiting for your decision · `DONE`.
 The scripts match rows by building a key from values (material, alt BOM, GrC). If one place writes `"01"` and another writes `"1"`, or `""` and `"0"`, the keys differ and the lookup finds nothing, **without any error**. There are two places this happens:
 
 **A5a - Alt BOM `"01"` vs `"1"` (phase 1)**
-- **Where:** `reader.py:47` and `create_main.py:35` clean the alt BOM with `clean_text`, which only trims spaces, so `"01"` stays `"01"`. SAP and phases 2/3 use `"1"` (via `clean_component`).
+- **Where:** `reader.py:47` and `bom_create_main.py:35` clean the alt BOM with `clean_text`, which only trims spaces, so `"01"` stays `"01"`. SAP and phases 2/3 use `"1"` (via `clean_component`).
 - **What happens if Sheet1 has `01`:**
   1. `decide_action` checks `alt == "1"` to choose CHANGE, so `"01"` becomes **CREATE instead of CHANGE**. A BOM that already exists is created as a new alternative.
   2. After the create, SAP's alt BOM (`2`) is compared with Excel's (`02`), which gives a **false "WARNING: SAP alt BOM 2, Excel alt BOM 02"**.
 - **Only happens** if Sheet1 holds the alt BOM as text with a leading zero. Typed numbers (`1`, `2`) are fine.
-- **Fix:** clean the alt BOM with `clean_component` in `reader.py` and `create_main.previous_results`. Note that SUCCESS rows already written with `"01"` would then need the same cleaning when they're read back.
+- **Fix:** clean the alt BOM with `clean_component` in `reader.py` and `bom_create_main.previous_results`. Note that SUCCESS rows already written with `"01"` would then need the same cleaning when they're read back.
 
 **A5b - Empty GrC `""` vs `"0"` (phase 2, Snowflake)**
 - **Where:** `routing_sf.py:213` and `:256` build the work center dictionary with the raw `GROUP_COUNTER`, and `:261` groups the allocation items by the raw `GROUP_COUNTER`. The lookups at `:223`, `:270` and `:277` use `counter = GROUP_COUNTER or "0"`.
@@ -67,7 +67,7 @@ The scripts match rows by building a key from values (material, alt BOM, GrC). I
 - **Fix:** check `has_sheet` first and print "run without continue first"; mark a non-numeric alt BOM as FAILED for that row.
 
 ### A7 - Phase 1 trusts the save blindly  `OPEN` (medium)
-- **Where:** `create_main.py:88-90`. After `save_bom`, the status is always SUCCESS, and the status bar text is only copied into MESSAGE.
+- **Where:** `bom_create_main.py:88-90`. After `save_bom`, the status is always SUCCESS, and the status bar text is only copied into MESSAGE.
 - **What happens:** if SAP shows an error after Save (status bar type `E` / `A`), the row is still SUCCESS, so it's **never retried and phase 2 looks for a BOM that doesn't exist**.
 - **Fix:** read `wnd[0]/sbar` `MessageType` and only set SUCCESS for `S` (or empty with a "created" text); otherwise FAILED.
 
@@ -115,21 +115,25 @@ python run_all.py [check] [slow] [from=2]
 
 ## D. Doc mismatches (log only, not fixed yet)
 
+Line numbers of `workflow.md` below are as of **2026-11-17**, after the doc pass that fixed
+the renamed script names (`create_main.py` -> `bom_create_main.py`, `main.py` ->
+`bom_update_main.py`) and added `run_all.py` to the commands section.
+
 | Doc | Line | Says | Actually |
 |---|---|---|---|
 | `routing.md` | 27 | `routing_main.py` "writes the `Result` sheet" | task newbom writes `Routing Result`; only altbom writes `Result` |
 | `routing.md` | 112-113 | "The first sheet (the source) is never changed" | true for phase 2; but in the chain file, phase 1 writes result columns into Sheet1 |
 | `routing.md` | 200 (pseudocode) | single routing only logs "Single routing, no header overview" | that text is also put in front of MESSAGE (see A2) |
-| `workflow.md` | 109 | "run `unmerge_excel.py` first" | `unmerge_excel.py` points to `CHANGE_BOM_demo.xlsx`; change its `INPUT_FILE` to `CREATE_BOM.xlsx` (or unmerge by hand) |
-| `workflow.md` | commands table | - | `python production_version.py test [slow]` (one hard-coded version) and `python routing.py` (one routing) are not listed |
-| `workflow.md` | 171 | "Waiting for routing assignment" for PENDING / FAILED | also shown for final SKIPPED reasons (A8) |
-| `archive/docs/routing_altbom_plan.md` | whole file | old design | historical; see `routing.md` |
+| `workflow.md` | 129 | "run `unmerge_excel.py` first" | `unmerge_excel.py` points to `CHANGE_BOM_demo.xlsx`; change `UNMERGE_FILE` in `config.py` to `CREATE_BOM.xlsx` (or unmerge by hand) |
+| `workflow.md` | commands table | - | ~~`python production_version.py test [slow]` not listed~~ **FIXED 2026-11-17** (`test` is now in the options table). `python routing.py` (one routing) is still not listed |
+| `workflow.md` | 191 | "Waiting for routing assignment" for PENDING / FAILED | also shown for final SKIPPED reasons (A8) |
+| ~~`archive/docs/routing_altbom_plan.md`~~ | whole file | old design | **file is not in the repo** (checked 2026-11-17); see `routing.md` |
 
 ---
 
 ## E. Other notes from the review
 - `routing_sf.load_routings()` is unused today. It's kept on purpose for a future standalone production version task (routing list from Snowflake instead of `Routing Result`).
-- `main.py` (CS02) saves its input with one sheet only. Never point it at the chain file.
+- `bom_update_main.py` (CS02) saves its input with one sheet only. Never point it at the chain file.
 - `docs/TODO.md` (TODO-1: search the first screen before scrolling in `bom.py`, base quantity for new BOMs) is still open and separate from this list.
 
 ---

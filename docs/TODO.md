@@ -4,7 +4,8 @@
 
 **Status:** Not started (idea / intention)
 **Files:** `bom.py` -> `find_item_row()`, `find_component_row()`, `scroll_bom_table()`
-**Background:** see `note.md`, sections 1-3
+**Background:** see `note.md`, sections 1-3 (**note: `note.md` is not in the repo**, checked
+2026-11-17; the same scrolling logic is described in `change_bom_rate.md` sections 1-2)
 
 ### Goal
 Search the rows already visible on screen first, without scrolling, like the
@@ -87,7 +88,8 @@ find_row(target):
 > current screen first without scrolling, and only fall back to the existing
 > scroll search (`scroll_bom_table()`) if not found. Follow the
 > "Things to watch out for" and "Suggested design" sections, keep returning a
-> visible row index, and read `change_bom/docs/note.md` for background.
+> visible row index, and read `change_bom/docs/change_bom_rate.md` sections 1-2 for
+> background (`note.md` is referenced in older notes but is not in the repo).
 
 
 ### todo2
@@ -148,7 +150,7 @@ Known issues this fixes:
   no duplicate component in the same BOM.
 - CHANGE: at least one "after" value filled, otherwise error "nothing to change".
 - CHANGE item: `Item` or `Component before` must be filled to find the line
-  (see note.md section 1). `Component before` is checked against SAP before changing.
+  (see `change_bom_rate.md` section 1). `Component before` is checked against SAP before changing.
 - Same Parent Material + Alt BOM with different `Base Qty after` values -> error.
 - Same Parent Material + Alt BOM with mixed actions (CREATE and CHANGE) -> error.
 
@@ -184,7 +186,8 @@ General rules for the form:
 > `bom_update_main.py` and `update_baseqty.py` into one BOM entry point that reads the
 > request-form columns, validates them with the listed rules, dispatches per row with
 > `BOM_ACTIONS`, and writes results through `workbook.py`. Keep the CS02 item-finding logic
-> from `note.md` sections 1-3 unchanged.
+> unchanged (described in `change_bom_rate.md` sections 1-2; older notes cite a `note.md`
+> that is not in the repo).
 
 
 ## TODO-4: Folder layout per SAP object
