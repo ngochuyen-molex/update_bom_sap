@@ -242,5 +242,6 @@ Full inventory (incl. standalone tools and importance): [`archive/README.md`](..
 Start here if you are new: [`../README.md`](../README.md).
 Known bugs, open decisions and plans: [`TODO_bug.md`](TODO_bug.md). CS02 search ideas: [`TODO.md`](TODO.md).
 
-> `note.md`, cited by `TODO.md` and by comments in `bom.py` / `bom_update_main.py` as the
-> background for the CS02 table scrolling, is **not in the repo** (checked 2026-11-17).
+> `note.md`, cited by older notes as the background for the CS02 table scrolling, is **not in
+> the repo** (checked 2026-11-17). Its sections 1-3 match `change_bom_rate.md` sections 1-3
+> one for one, so all references now point there instead.

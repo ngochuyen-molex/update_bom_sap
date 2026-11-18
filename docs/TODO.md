@@ -4,8 +4,11 @@
 
 **Status:** Not started (idea / intention)
 **Files:** `bom.py` -> `find_item_row()`, `find_component_row()`, `scroll_bom_table()`
-**Background:** see `note.md`, sections 1-3 (**note: `note.md` is not in the repo**, checked
-2026-11-17; the same scrolling logic is described in `change_bom_rate.md` sections 1-2)
+**Background:** see `change_bom_rate.md`, sections 1-3. (Older notes and code comments cited
+a `note.md` for this; that file is **not in the repo** (checked 2026-11-17), but
+`change_bom_rate.md` sections 1, 2 and 3 cover exactly the same three topics in the same
+order - item vs component search, scrolling / invalid references, absolute vs visible row -
+so the old section numbers still apply.)
 
 ### Goal
 Search the rows already visible on screen first, without scrolling, like the
@@ -13,8 +16,7 @@ original code did. Only if the Item / Component is not found there,
 scroll page by page using `scroll_bom_table()` (the current behaviour).
 
 Expected benefits:
-- Fewer scroll actions, so it is faster and there are fewer chances for SAP GUI
-  errors.
+- Fewer scroll actions, so it is faster and there are fewer chances for SAP GUI errors.
 - The original simple logic is used for small BOMs, which are most of them.
 
 ### Current behaviour
@@ -55,8 +57,8 @@ def find_item_row(session, target_item):
      no scrolling is needed and the duplicate check is complete. Only scroll
      when the BOM is longer than one screen.  <- recommended
 4. **Never reuse old table/scrollbar references after scrolling.** Always use
-   `scroll_bom_table()` (see `note.md`, section 2).
-5. The function must still return a **visible** row index (see `note.md`,
+   `scroll_bom_table()` (see `change_bom_rate.md`, section 2).
+5. The function must still return a **visible** row index (see `change_bom_rate.md`,
    section 3).
 
 ### Suggested design
@@ -92,16 +94,6 @@ find_row(target):
 > background (`note.md` is referenced in older notes but is not in the repo).
 
 
-### todo2
-cleanlayout:
- bom.py         → shared helpers (cleaning + SAP basics)
-    bom_change.py  → CS02 functions (moved out of bom.py)
-    bom_create.py  → CS01 functions
-
-## CREATE BOM: 
-- solve correct base quantity for new bom creation
-
-
 ## TODO-3: One BOM entry point, action chosen per row in the input Excel
 
 **Status:** Not started (needs the request form below to be agreed first)
@@ -128,6 +120,9 @@ Known issues this fixes:
   and remove `load_excel` when the old scripts are gone.
 - `reader.decide_action` defaults to CHANGE when alt BOM = 1 and Action is empty. A blank
   cell silently decides what is posted to SAP.
+- **Open question, still unanswered:** what base quantity a newly created BOM should get.
+  Today CREATE takes `Base Qty after` from the request form; it is not derived or checked
+  against the routing. Decide this before CREATE and the base-qty change share one path.
 
 ### Target design
 - One script / CLI command for all BOM work: `python cli.py bom <file>`.
@@ -186,13 +181,13 @@ General rules for the form:
 > `bom_update_main.py` and `update_baseqty.py` into one BOM entry point that reads the
 > request-form columns, validates them with the listed rules, dispatches per row with
 > `BOM_ACTIONS`, and writes results through `workbook.py`. Keep the CS02 item-finding logic
-> unchanged (described in `change_bom_rate.md` sections 1-2; older notes cite a `note.md`
+> unchanged (described in `change_bom_rate.md` sections 1-3; older notes cite a `note.md`
 > that is not in the repo).
 
 
 ## TODO-4: Folder layout per SAP object
 
-**Status:** Not started (do after TODO-3; replaces the rough "todo2" note above)
+**Status:** Not started (do after TODO-3)
 **Done 2026-11-16:** `config.py` (paths, plant, usage, connections, SAVE_EVERY), `utils.py`
 (clean_* + numbers_equal, `bom.py` re-exports them), `excel_utils.py` merged into `workbook.py`
 and deleted. Still in the flat folder; the folder move below is not done.

@@ -49,14 +49,15 @@ python routing_main.py altbom            # work list -> Result sheet -> SAP run
 python routing_main.py altbom continue   # carry on with the Result sheet (no Snowflake)
 ```
 
-| Option | Meaning |
+The full option matrix for all three phases is in [`workflow.md`](workflow.md) section 1.
+Only the parts that are specific to this task:
+
+| Option | Meaning here |
 |---|---|
 | `altbom` | task "altbom" (input `md_assign_component.xlsx`). Without it: task "newbom" (see 2.2) |
-| *(none)* | get the work list from Snowflake, write `Result` + `Preview`, run SAP |
-| `check` | get the work list from Snowflake, write `Result` + `Preview`, **stop** (no SAP) |
-| `continue` | read `Result` (**no Snowflake**), process only `PENDING` and `FAILED` rows, update them in place. `retry` does the same. `Preview` is not rebuilt |
-| `fresh` | rebuild the result sheet (+ `Preview`) although it already exists; SUCCESS rows of the old sheet are kept |
-| `slow` | wait after every SAP action (`STEP_DELAY` in `connect.py`), to watch the run |
+| `check` | work list from Snowflake, write `Result` **+ `Preview`**, stop (no SAP) |
+| `continue` | read `Result` (**no Snowflake**), process only `PENDING` and `FAILED` rows, update them in place. `retry` does the same. **`Preview` is not rebuilt** |
+| `fresh` | rebuild the result sheet (**+ `Preview`**) although it already exists; SUCCESS rows of the old sheet are kept |
 
 Options can be combined in any order, e.g. `python routing_main.py altbom continue slow`.
 
@@ -301,7 +302,7 @@ Save: `wnd[0]/tbar[0]/btn[11]`.
 | Setting | File | Value |
 |---|---|---|
 | `TASKS` (input files, material column) | `routing_main.py` | see 2.1 / 2.2 |
-| `SAVE_EVERY` | `routing_main.py` | 5 |
+| `SAVE_EVERY` | `config.py` | 5 (`routing_main.py` only aliases it) |
 | `PACKAGING_WORDS` | `routing.py` | carton, sheet, bag, silica, bubble, box |
 | `LUBRICANT_WORDS` | `routing.py` | lubricant |
 | `LUBRICANT_0030_WORK_CENTERS` | `routing.py` | YMHI, YMHI-1 |

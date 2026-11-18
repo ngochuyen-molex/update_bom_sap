@@ -13,19 +13,14 @@ Status: `OPEN` = to do · `DECIDE` = waiting for your decision · `DONE`.
 - **Done:** all 3 phases now show a prompt when the file is open: `[s]` save your edits + close it in Excel and continue, `[r]` I closed it, retry, `[q]` stop. On `[q]` the SAP loop **stops at once** and prints which row is in SAP but not in Excel (set it by hand before the next run). Code: `workbook.close_in_excel`, `ask_when_locked`, `save_sheets`; used by `save_sheet` / `update_source_columns`. Tested with real Excel on a temp copy: `[s]` kept the unsaved edit, closed the file and saved the results; `[q]` stopped.
 - **Was:** `bom_create_main.py` ignored the result of `save(...)` in the loop.
 - **What happens:** if `CREATE_BOM.xlsx` is open in Excel, the save fails with "Could not save ... Close it in Excel." but the loop goes on creating BOMs in SAP. Their SUCCESS is never written, so the **next run creates the same BOMs again (duplicates in SAP)**.
-- **Fix:** stop the loop as soon as a save fails, or use the retry prompt from section B (recommended).
-- **Option asked about (2026-11-16): close Excel for you, saving your work first.** When the save fails:
-  1. Attach to the running Excel (`win32com`) and find `CREATE_BOM.xlsx`.
-  2. `Save()` it, so your edits are kept and no "save changes?" pop-up appears.
-  3. `Close()` it.
-  4. Save the results again. If that still fails, **stop the run**.
-  - Proposed as a prompt: `[s] save your edits + close it and continue  [r] I closed it, retry  [q] stop`. Put it in `workbook.py` once, for all phases.
-  - Limits:
-    - In cell edit mode Excel rejects the call: retry a few times, then stop.
-    - Your edits **in result sheets** are overwritten by the script. Sheet1 edits are kept, except the 4 result columns.
-    - It can't close a lock held by another user / OneDrive / a read-only copy: falls back to [r] / [q].
-    - It must never wait on a dialog such as Save As.
-  - Status: `DONE` (prompt version)
+- **Limits of the shipped prompt** (still true, worth knowing):
+  - In cell edit mode Excel rejects the call: it retries a few times, then stops.
+  - Your edits **in result sheets** are overwritten by the script. Sheet1 edits are kept, except the 4 result columns.
+  - It can't close a lock held by another user / OneDrive / a read-only copy: falls back to `[r]` / `[q]`.
+  - Alternatives that were considered and rejected: writing results to a second
+    `..._unsaved_<time>.xlsx` file (two files to merge by hand, and the next run doesn't know
+    about them -> duplicates), and `taskkill /IM excel.exe` (closes every workbook, loses all
+    unsaved work).
 
 ### A2 - No production version for single-routing groups  `DECIDE`
 - **Where:** `routing.py:294` adds the prefix `"Single routing, no header overview. "` to the phase 2 message. `production_version.py:208` only accepts a message that **starts with** `"No unassigned components on screen"`.
@@ -78,42 +73,24 @@ The scripts match rows by building a key from values (material, alt BOM, GrC). I
 
 ---
 
-## B. "Can it force-close the file and then save?"
+## B. One script for all phases (`run_all.py`)  `DONE`
 
-Short answer: **yes, technically, but closing your Excel for you is risky.** When the save fails because the workbook is open, the options are:
+Built and in use. Usage and behaviour: the docstring of `run_all.py` and
+[`workflow.md`](workflow.md) section 1.
 
-| # | Option | How | Risk |
-|---|---|---|---|
-| 1 | **Stop the run** | save fails -> stop SAP work, print what wasn't saved | none; the work stops (fixes A1) |
-| 2 | **Wait and retry** (recommended) | save fails -> `"CREATE_BOM.xlsx is open. Close it and press Enter to retry (or type q)"`, then try again. SAP work waits | none; needs you at the PC |
-| 3 | **Backup file** | save fails -> write the results to `CREATE_BOM_unsaved_<time>.xlsx`, continue | results in two files, must be merged by hand; the next run doesn't know about them -> duplicates possible |
-| 4 | **Force-close via Excel** | `win32com` attaches to the running Excel, finds the workbook and `Close(SaveChanges=False)`, then saves | **your unsaved edits in that workbook are lost**; Excel may show a dialog and hang the script; doesn't help if another user / OneDrive sync holds the lock |
-| 5 | Kill Excel | `taskkill /IM excel.exe` | closes **all** workbooks, loses all unsaved work. Not recommended |
+It turned out differently from the plan this section used to hold: the phases were **not**
+changed to return their counts from `main()`. `run_all.py` runs each phase as a subprocess
+and reads the STATUS counts back out of the result sheets (`run_all.py`, `status_counts`),
+so no phase had to change at all.
 
-**Recommendation:** 2 (+ 1 when you type q). Optionally 4 only after asking: `"Close CREATE_BOM.xlsx in Excel without saving your changes there? (y/n)"`. Put it in `workbook.py` once, so all three phases behave the same.
-
----
-
-## C. Plan - one script for all phases (`run_all.py`)  `PLANNED`
-
-Yes, this is fine; the phases are already separate modules. Planned design (not built yet):
-
-```text
-python run_all.py [check] [slow] [from=2]
-  1. phase 1  create_main.main()          -> stop if any BOM FAILED (ask: continue anyway?)
-  2. wait     MLX_DATALAKE lag (~20 min) only if the routings of new materials are needed;
-              phase 2 takes the new alt BOM from Sheet1, so usually no wait is needed
-  3. phase 2  routing_main (task newbom)  -> fresh if the sheet exists, else normal
-  4. phase 3  production_version          -> fresh / normal
-  5. summary  counts per phase, list of FAILED rows
-```
-- `check` runs every phase in check mode (no SAP); `from=N` restarts at phase N.
-- Each phase's `main()` should **return** its counts instead of only printing them, so `run_all.py` can decide whether to go on. That's a small change per phase.
-- Fix A1 / A2 / A7 first; otherwise an unattended full run can silently lose results.
+- **Still open before trusting an unattended full run:** A7 (`OPEN`) and A2 (`DECIDE`).
+  A1 is already `DONE`, so a locked Excel file no longer loses results silently. A7 is the
+  important one left - a phase 1 row that SAP rejected is still marked SUCCESS, so the chain
+  carries on with a BOM that does not exist.
 
 ---
 
-## D. Doc mismatches (log only, not fixed yet)
+## C. Doc mismatches (log only, not fixed yet)
 
 Line numbers of `workflow.md` below are as of **2026-11-17**, after the doc pass that fixed
 the renamed script names (`create_main.py` -> `bom_create_main.py`, `main.py` ->
@@ -131,14 +108,14 @@ the renamed script names (`create_main.py` -> `bom_create_main.py`, `main.py` ->
 
 ---
 
-## E. Other notes from the review
+## D. Other notes from the review
 - `routing_sf.load_routings()` is unused today. It's kept on purpose for a future standalone production version task (routing list from Snowflake instead of `Routing Result`).
 - `bom_update_main.py` (CS02) saves its input with one sheet only. Never point it at the chain file.
 - `docs/TODO.md` (TODO-1: search the first screen before scrolling in `bom.py`, base quantity for new BOMs) is still open and separate from this list.
 
 ---
 
-## F. Plan - CA01 (create routing) later  `PLANNED`
+## E. Plan - CA01 (create routing) later  `PLANNED`
 
 CA01 and CA02 share most screens; only the way in differs.
 

@@ -82,7 +82,7 @@ def get_component_status_bar_text(session):
 # ============================================================
 
 def find_item_row(session, target_item):
-    # Returns a visible row index. See docs/change_bom_rate.md, sections 1-2.
+    # Returns a visible row index. See docs/change_bom_rate.md, sections 2-3.
     # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
 
@@ -119,7 +119,7 @@ def find_item_row(session, target_item):
 
 def find_component_row(session, target_component):
     # Used when Excel Item is blank. Fails on duplicates on purpose.
-    # See docs/change_bom_rate.md, sections 1-2.
+    # See docs/change_bom_rate.md, sections 1-3.
     # TODO-1 (TODO.md): search current screen first, scroll only if not found.
     table = get_bom_item_table(session)
     target_component = clean_component(target_component)
@@ -165,7 +165,7 @@ def find_component_row(session, target_component):
         )
 
     # Scroll back to the matched page and convert absolute row -> visible row.
-    # See docs/change_bom_rate.md, section 2 ("Example" / safety checks).
+    # See docs/change_bom_rate.md, section 3.
     absolute_row, page_start = matching_rows[0]
     visible_row = absolute_row - scroll_bom_table(session, page_start)
     if not 0 <= visible_row < visible_rows:
