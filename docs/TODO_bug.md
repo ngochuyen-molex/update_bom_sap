@@ -135,3 +135,60 @@ CA01 and CA02 share most screens; only the way in differs.
 5. The rules (`is_packaging`, `is_lubricant`, `planned_operation`, `skip_reason`) are reused as they are.
 
 Same idea as the shared UI catalog (`sap_ui/`) discussed on 2026-11-16: do it per screen when there is a real second use.
+
+---
+
+## F. Plan - standalone production versions from a material list  `PLANNED` (2026-11-18)
+
+Goal: any file with a `Material` column (e.g. `add_routing_test.xlsx`) -> a production version for
+every active routing x every active alt BOM. Not possible today: `production_version.py` only reads
+`Routing Result` of `CHAIN_FILE` (phase 3 of the chain).
+
+**Decided (2026-11-18):**
+- Alt BOM: **every active alt BOM** (`SQL_ALT_BOMS`), not the file's `Alt Bom` column.
+- Rows: **all materials** in the file (the `Action` column is ignored).
+- Duplicate = existing version with **same group + GrC + alt BOM** -> SKIPPED. A routing can get one
+  version per alt BOM.
+
+### F1 - Check for existing production versions  `TODO` (must be done before a real run)
+- **Today there is no duplicate check at all.** `read_versions()` (`production_version.py:75`)
+  reads only the version **number** (column 0) to find the next free number. Running twice, or on a
+  routing that already has a version, **creates a duplicate**. The chain doesn't notice because it
+  only works on BOMs it just created.
+- **Plan:** in MM02, after opening the version list, read number + group + GrC + alt BOM of every
+  existing version (once per material) and skip `(group, GrC, alt BOM)` that already exist:
+  `SKIPPED "Production version exists (0003)"`.
+- **Needs:** the column IDs of group / GrC / alt BOM in `wnd[1]/usr/tblSAPLMDIAT_MKAL_NEW` (only column
+  0 is known). A screenshot of the list or one recording is enough.
+- Why SAP and not Snowflake (MKAL): Snowflake lags about 20 min, so a version created in the last
+  run would not be seen. Snowflake MKAL may be used as a pre-check in `check` mode only.
+
+### F2 - Routing filter compared with ROUTING (`checks/routing_condition`)
+`routing_sf.SQL_ROUTINGS` (this repo) vs `ROUTING/src/routing/data/routing.py`
+`SQL_ROUTINGS_WITH_RESOURCE` (used by `checks/routing_condition`), checked 2026-11-18:
+
+| Filter | change_bom `SQL_ROUTINGS` | ROUTING `routing_condition` | Effect |
+|---|---|---|---|
+| MAPL -> PLKO join, plant 1901 | yes | yes | same |
+| `PLKO.LOEKZ` / `MAPL.LOEKZ` blank | yes (`TRIM(..) = ''`) | yes (`= ' '`) | same |
+| `DW_SOFT_DELETE_FLAG = 0` (PLKO, MAPL) | yes | yes | same (permanently deleted gone) |
+| Deletion flag `PLKO.DELKZ` | returned; `X` -> **SKIPPED "Deleted routing"** | returned, **not** filtered (flagged = still exists, for reactivation) | same data, different use: for production versions we skip X |
+| `PLNTY = 'N'` (standard routing) | **yes** | no (only in the join) -> rate routings (Q) can appear | ours stricter |
+| Latest change state | **QUALIFY latest `ZAEHL`** | `SELECT DISTINCT` (all change states) | ROUTING can return the same routing twice, e.g. once with DELKZ X and once blank; ours takes the current state |
+| Needs operations (PLAS/PLPO/CRHD join) | no | yes (inner join) | ROUTING hides routings without active operations; ours includes them |
+| Material status (`MARC.MMSTA` E3, `LVORM`) | **no** | not here (but `group_counters` and `delete_status` check it; the file shows "material status E3 (not active in this plant)") | **gap:** a material with status E3 would still get production versions tried - add a MARC filter |
+| Trial routing (`TRIAL` in KTEXT) | skipped in code (`is_trial`) | ROUTING's matcher has its own trial rule | same intent |
+
+To do for F: add the MARC filter (`MMSTA != 'E3'`, `LVORM` blank, `DW_SOFT_DELETE_FLAG = 0`).
+Decide whether a routing without active operations should get a production version.
+
+### F3 - Build (after F1)
+`python production_version.py materials <file>`:
+1. Read `Material`.
+2. Snowflake: `load_routings` + `SQL_ALT_BOMS`.
+3. Work list routing x active alt BOM (skip DELKZ / trial / E3).
+4. MM02 with the F1 check.
+5. `Prod Version Result` sheet in that file, with `check` / `continue` / `fresh` like phase 3.
+
+**Lag:** routings the ROUTING tool changed in the last ~20 min (e.g. set inactive) still look active
+in Snowflake. The SAP-side check (F1) and the MM02 "Check" button (group / GrC valid) are the safety net.
